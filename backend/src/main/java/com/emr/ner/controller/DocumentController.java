@@ -12,6 +12,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -122,7 +123,13 @@ public class DocumentController {
 
     @PostMapping("/batch-status")
     public ResponseEntity<Void> batchUpdateStatus(@RequestBody Map<String, Object> request) {
-        List<Long> documentIds = (List<Long>) request.get("documentIds");
+        List<?> rawIds = (List<?>) request.get("documentIds");
+        List<Long> documentIds = new ArrayList<>();
+        for (Object id : rawIds) {
+            if (id instanceof Number) {
+                documentIds.add(((Number) id).longValue());
+            }
+        }
         String status = (String) request.get("status");
         documentService.batchUpdateStatus(documentIds, status, 1L);
         return ResponseEntity.ok().build();
@@ -142,8 +149,17 @@ public class DocumentController {
     }
 
     @PostMapping("/export")
-    public ResponseEntity<List<ExportDocumentDTO>> exportAnnotations(@RequestBody(required = false) Map<String, List<Long>> request) {
-        List<Long> documentIds = request != null ? request.get("documentIds") : null;
+    public ResponseEntity<List<ExportDocumentDTO>> exportAnnotations(@RequestBody(required = false) Map<String, Object> request) {
+        List<Long> documentIds = null;
+        if (request != null && request.containsKey("documentIds")) {
+            List<?> rawIds = (List<?>) request.get("documentIds");
+            documentIds = new ArrayList<>();
+            for (Object id : rawIds) {
+                if (id instanceof Number) {
+                    documentIds.add(((Number) id).longValue());
+                }
+            }
+        }
         return ResponseEntity.ok(documentService.exportAnnotations(documentIds));
     }
 }

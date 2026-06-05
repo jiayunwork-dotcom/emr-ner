@@ -26,4 +26,11 @@ public interface EntityRepository extends JpaRepository<Entity, Long> {
 
     @Query("SELECT e FROM Entity e WHERE e.documentId IN :documentIds")
     List<Entity> findByDocumentIds(List<Long> documentIds);
+
+    @Query("SELECT LOWER(TRIM(e.entityText)), e.entityType, COUNT(e) FROM Entity e " +
+           "GROUP BY LOWER(TRIM(e.entityText)), e.entityType")
+    List<Object[]> findEntityTypeGroups();
+
+    @Query("SELECT e FROM Entity e WHERE LOWER(TRIM(e.entityText)) = LOWER(TRIM(:entityText))")
+    List<Entity> findByEntityTextIgnoreCase(String entityText);
 }

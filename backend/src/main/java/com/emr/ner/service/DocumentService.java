@@ -359,13 +359,44 @@ public class DocumentService {
     }
 
     public List<ConsistencyConflictDTO> checkConsistency() {
-        List<Entity> allEntities = entityRepository.findAll();
-        Map<String, List<EntityAnnotationDTO>> entityMap = new HashMap<>();
-        Map<Long, Document> docMap = documentRepository.findAll().stream()
+        List<Object[]> groups = entityRepository.findEntityTypeGroups();
+        Map<String, Set<String>> entityTypeMap = new HashMap<>();
+        
+        for (Object[] row : groups) {
+            String entityText = (String) row[0];
+            String entityType = (String) row[1];
+            if (entityText == null || entityText.isEmpty()) continue;
+            
+            entityTypeMap.computeIfAbsent(entityText, k -> new HashSet<>()).add(entityType);
+        }
+
+        Set<String> conflictEntityTexts = new HashSet<>();
+        for (Map.Entry<String, Set<String>> entry : entityTypeMap.entrySet()) {
+            if (entry.getValue().size() > 1) {
+                conflictEntityTexts.add(entry.getKey());
+            }
+        }
+
+        if (conflictEntityTexts.isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        List<Entity> allConflictEntities = new ArrayList<>();
+        for (String text : conflictEntityTexts) {
+            allConflictEntities.addAll(entityRepository.findByEntityTextIgnoreCase(text));
+        }
+
+        Set<Long> docIds = allConflictEntities.stream()
+            .map(Entity::getDocumentId)
+            .collect(Collectors.toSet());
+        
+        List<Document> docs = documentRepository.findAllById(docIds);
+        Map<Long, Document> docMap = docs.stream()
             .collect(Collectors.toMap(Document::getId, d -> d));
 
-        for (Entity entity : allEntities) {
-            String key = entity.getEntityText().trim();
+        Map<String, List<EntityAnnotationDTO>> entityMap = new HashMap<>();
+        for (Entity entity : allConflictEntities) {
+            String key = entity.getEntityText().trim().toLowerCase();
             if (key.isEmpty()) continue;
             
             EntityAnnotationDTO ann = new EntityAnnotationDTO();
@@ -384,16 +415,12 @@ public class DocumentService {
         List<ConsistencyConflictDTO> conflicts = new ArrayList<>();
         for (Map.Entry<String, List<EntityAnnotationDTO>> entry : entityMap.entrySet()) {
             List<EntityAnnotationDTO> annotations = entry.getValue();
-            Set<String> types = annotations.stream()
-                .map(EntityAnnotationDTO::getEntityType)
-                .collect(Collectors.toSet());
+            if (annotations.isEmpty()) continue;
             
-            if (types.size() > 1) {
-                ConsistencyConflictDTO conflict = new ConsistencyConflictDTO();
-                conflict.setEntityText(entry.getKey());
-                conflict.setAnnotations(annotations);
-                conflicts.add(conflict);
-            }
+            ConsistencyConflictDTO conflict = new ConsistencyConflictDTO();
+            conflict.setEntityText(annotations.get(0).getEntityText());
+            conflict.setAnnotations(annotations);
+            conflicts.add(conflict);
         }
 
         return conflicts;
@@ -401,9 +428,7 @@ public class DocumentService {
 
     @Transactional
     public void resolveConsistencyConflict(String entityText, String targetType, Long userId) {
-        List<Entity> entities = entityRepository.findAll().stream()
-            .filter(e -> e.getEntityText().trim().equals(entityText.trim()))
-            .collect(Collectors.toList());
+        List<Entity> entities = entityRepository.findByEntityTextIgnoreCase(entityText);
         
         for (Entity entity : entities) {
             entity.setEntityType(targetType);
@@ -427,23 +452,30 @@ public class DocumentService {
             exportDoc.setText(doc.getContent());
 
             List<Entity> entities = entityRepository.findByDocumentId(doc.getId());
-            entities.sort(Comparator.comparingInt(Entity::getStartPos));
+            
+            Map<String, Entity> humanEntityMap = new HashMap<>();
+            for (Entity e : entities) {
+                if ("human".equals(e.getSource())) {
+                    String key = e.getStartPos() + "-" + e.getEndPos();
+                    humanEntityMap.put(key, e);
+                }
+            }
 
             List<Entity> filteredEntities = new ArrayList<>();
-            Set<String> humanEntityKeys = new HashSet<>();
+            Set<Long> addedEntityIds = new HashSet<>();
             
             for (Entity e : entities) {
                 String key = e.getStartPos() + "-" + e.getEndPos();
                 if ("human".equals(e.getSource())) {
-                    humanEntityKeys.add(key);
-                    filteredEntities.add(e);
-                }
-            }
-            
-            for (Entity e : entities) {
-                String key = e.getStartPos() + "-" + e.getEndPos();
-                if (!"human".equals(e.getSource()) && !humanEntityKeys.contains(key)) {
-                    filteredEntities.add(e);
+                    if (!addedEntityIds.contains(e.getId())) {
+                        filteredEntities.add(e);
+                        addedEntityIds.add(e.getId());
+                    }
+                } else {
+                    if (!humanEntityMap.containsKey(key) && !addedEntityIds.contains(e.getId())) {
+                        filteredEntities.add(e);
+                        addedEntityIds.add(e.getId());
+                    }
                 }
             }
 
@@ -466,10 +498,15 @@ public class DocumentService {
 
             List<Relation> relations = relationRepository.findByDocumentId(doc.getId());
             List<ExportRelationDTO> exportRelations = new ArrayList<>();
+            int entityCount = exportEntities.size();
+            
             for (Relation r : relations) {
                 Integer headIdx = entityIndexMap.get(r.getHeadEntityId());
                 Integer tailIdx = entityIndexMap.get(r.getTailEntityId());
-                if (headIdx != null && tailIdx != null) {
+                
+                if (headIdx != null && tailIdx != null 
+                    && headIdx >= 0 && headIdx < entityCount 
+                    && tailIdx >= 0 && tailIdx < entityCount) {
                     ExportRelationDTO er = new ExportRelationDTO();
                     er.setHead(headIdx);
                     er.setTail(tailIdx);
