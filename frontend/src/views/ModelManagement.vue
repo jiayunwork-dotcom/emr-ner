@@ -697,15 +697,25 @@ const compareTableData = computed(() => {
     rows.push(row)
   }
   
-  const overallRow = {
-    entityType: 'overall',
+  const macroRow = {
+    entityType: 'overall-macro',
     entityTypeLabel: 'Overall (Macro-F1)',
     f1Values: {}
   }
   for (const result of comparisonResults.value) {
-    overallRow.f1Values[result.modelVersionId] = result.overallMacro?.f1Score ?? null
+    macroRow.f1Values[result.modelVersionId] = result.overallMacro?.f1Score ?? null
   }
-  rows.push(overallRow)
+  rows.push(macroRow)
+
+  const microRow = {
+    entityType: 'overall-micro',
+    entityTypeLabel: 'Overall (Micro-F1)',
+    f1Values: {}
+  }
+  for (const result of comparisonResults.value) {
+    microRow.f1Values[result.modelVersionId] = result.overallMicro?.f1Score ?? null
+  }
+  rows.push(microRow)
   
   return rows
 })

@@ -7,12 +7,10 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -25,7 +23,7 @@ public class EvaluationService {
     private final EvaluationTaskRepository taskRepository;
     private final EvaluationResultRepository resultRepository;
     private final ModelVersionRepository modelVersionRepository;
-    private final InferenceService inferenceService;
+    private final EvaluationAsyncService evaluationAsyncService;
     private final ObjectMapper objectMapper;
 
     private static final Set<String> VALID_ENTITY_TYPES = Set.of(
@@ -178,155 +176,9 @@ public class EvaluationService {
 
         task = taskRepository.save(task);
 
-        executeEvaluationAsync(task.getId());
+        evaluationAsyncService.executeEvaluationAsync(task.getId());
 
         return task;
-    }
-
-    @Async("taskExecutor")
-    @Transactional
-    public void executeEvaluationAsync(Long taskId) {
-        try {
-            EvaluationTask task = taskRepository.findById(taskId)
-                .orElseThrow(() -> new RuntimeException("任务不存在: " + taskId));
-            
-            task.setStatus("running");
-            task.setStartedAt(LocalDateTime.now());
-            taskRepository.save(task);
-
-            EvaluationDataset dataset = getDataset(task.getDatasetId());
-            List<Map<String, Object>> records = dataset.getContent();
-
-            Map<String, int[]> typeCounts = new HashMap<>();
-            for (String type : VALID_ENTITY_TYPES) {
-                typeCounts.put(type, new int[]{0, 0, 0});
-            }
-
-            int processed = 0;
-            int failed = 0;
-
-            for (Map<String, Object> record : records) {
-                try {
-                    String text = (String) record.get("text");
-                    List<Map<String, Object>> goldEntities = (List<Map<String, Object>>) record.get("entities");
-
-                    InferenceResultDTO inferenceResult = inferenceService.infer(text, null);
-                    List<EntityDTO> predEntities = inferenceResult.getEntities();
-
-                    compareEntities(goldEntities, predEntities, typeCounts);
-
-                    processed++;
-                    if (processed % 10 == 0) {
-                        task.setProcessedCount(processed);
-                        taskRepository.save(task);
-                    }
-                } catch (Exception e) {
-                    failed++;
-                    log.warn("评估记录处理失败: {}", e.getMessage());
-                }
-            }
-
-            saveEvaluationResults(task.getId(), task.getModelVersionId(), task.getDatasetId(), typeCounts);
-
-            task.setStatus("completed");
-            task.setProcessedCount(processed);
-            task.setFailedCount(failed);
-            task.setCompletedAt(LocalDateTime.now());
-            taskRepository.save(task);
-
-        } catch (Exception e) {
-            log.error("评估任务执行失败", e);
-            try {
-                EvaluationTask task = taskRepository.findById(taskId).orElse(null);
-                if (task != null) {
-                    task.setStatus("failed");
-                    task.setErrorMessage(e.getMessage());
-                    task.setCompletedAt(LocalDateTime.now());
-                    taskRepository.save(task);
-                }
-            } catch (Exception ex) {
-                log.error("更新任务状态失败", ex);
-            }
-        }
-    }
-
-    private void compareEntities(List<Map<String, Object>> goldEntities, 
-                                  List<EntityDTO> predEntities,
-                                  Map<String, int[]> typeCounts) {
-        Set<String> goldSet = new HashSet<>();
-        Map<String, String> goldTypeMap = new HashMap<>();
-        
-        for (Map<String, Object> gold : goldEntities) {
-            String type = (String) gold.get("type");
-            int start = ((Number) gold.get("start")).intValue();
-            int end = ((Number) gold.get("end")).intValue();
-            String text = (String) gold.get("text");
-            String key = start + "-" + end + "-" + text + "-" + type;
-            goldSet.add(key);
-            goldTypeMap.put(key, type);
-        }
-
-        Set<String> predSet = new HashSet<>();
-        Map<String, String> predTypeMap = new HashMap<>();
-        
-        for (EntityDTO pred : predEntities) {
-            String type = pred.getEntityType();
-            if (!VALID_ENTITY_TYPES.contains(type)) continue;
-            int start = pred.getStartPos();
-            int end = pred.getEndPos();
-            String text = pred.getEntityText();
-            String key = start + "-" + end + "-" + text + "-" + type;
-            predSet.add(key);
-            predTypeMap.put(key, type);
-        }
-
-        for (String key : goldSet) {
-            String type = goldTypeMap.get(key);
-            int[] counts = typeCounts.get(type);
-            if (predSet.contains(key)) {
-                counts[0]++;
-            } else {
-                counts[2]++;
-            }
-        }
-
-        for (String key : predSet) {
-            if (!goldSet.contains(key)) {
-                String type = predTypeMap.get(key);
-                int[] counts = typeCounts.get(type);
-                counts[1]++;
-            }
-        }
-    }
-
-    private void saveEvaluationResults(Long taskId, Long modelVersionId, Long datasetId,
-                                        Map<String, int[]> typeCounts) {
-        for (Map.Entry<String, int[]> entry : typeCounts.entrySet()) {
-            String type = entry.getKey();
-            int[] counts = entry.getValue();
-            int tp = counts[0];
-            int fp = counts[1];
-            int fn = counts[2];
-
-            EvaluationResult result = new EvaluationResult();
-            result.setTaskId(taskId);
-            result.setModelVersionId(modelVersionId);
-            result.setDatasetId(datasetId);
-            result.setEntityType(type);
-            result.setTruePositives(tp);
-            result.setFalsePositives(fp);
-            result.setFalseNegatives(fn);
-
-            float precision = (tp + fp) > 0 ? (float) tp / (tp + fp) : 0f;
-            float recall = (tp + fn) > 0 ? (float) tp / (tp + fn) : 0f;
-            float f1 = (precision + recall) > 0 ? 2 * precision * recall / (precision + recall) : 0f;
-
-            result.setPrecision(precision);
-            result.setRecall(recall);
-            result.setF1Score(f1);
-
-            resultRepository.save(result);
-        }
     }
 
     public EvaluationTaskProgressDTO getTaskProgress(Long taskId) {
