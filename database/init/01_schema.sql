@@ -138,20 +138,47 @@ CREATE TABLE IF NOT EXISTS evaluation_datasets (
     id BIGSERIAL PRIMARY KEY,
     dataset_name VARCHAR(255) UNIQUE NOT NULL,
     description TEXT,
-    document_count INTEGER DEFAULT 0,
+    record_count INTEGER DEFAULT 0,
     file_path VARCHAR(255),
+    content JSONB,
     created_by BIGINT REFERENCES users(id),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS evaluation_tasks (
+    id BIGSERIAL PRIMARY KEY,
+    dataset_id BIGINT NOT NULL REFERENCES evaluation_datasets(id) ON DELETE CASCADE,
+    model_version_id BIGINT NOT NULL REFERENCES model_versions(id) ON DELETE CASCADE,
+    model_version_name VARCHAR(50),
+    status VARCHAR(20) DEFAULT 'pending',
+    total_count INTEGER DEFAULT 0,
+    processed_count INTEGER DEFAULT 0,
+    failed_count INTEGER DEFAULT 0,
+    created_by BIGINT REFERENCES users(id),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    started_at TIMESTAMP,
+    completed_at TIMESTAMP,
+    error_message TEXT
+);
+
+CREATE INDEX idx_evaluation_tasks_status ON evaluation_tasks(status);
+CREATE INDEX idx_evaluation_tasks_dataset ON evaluation_tasks(dataset_id);
+CREATE UNIQUE INDEX idx_evaluation_tasks_running ON evaluation_tasks(dataset_id, status) WHERE status = 'running';
+
 CREATE TABLE IF NOT EXISTS evaluation_results (
     id BIGSERIAL PRIMARY KEY,
+    task_id BIGINT REFERENCES evaluation_tasks(id) ON DELETE CASCADE,
     model_version_id BIGINT NOT NULL REFERENCES model_versions(id) ON DELETE CASCADE,
     dataset_id BIGINT NOT NULL REFERENCES evaluation_datasets(id) ON DELETE CASCADE,
     entity_type VARCHAR(50),
+    true_positives INTEGER DEFAULT 0,
+    false_positives INTEGER DEFAULT 0,
+    false_negatives INTEGER DEFAULT 0,
     precision FLOAT,
     recall FLOAT,
     f1_score FLOAT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(model_version_id, dataset_id, entity_type)
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE INDEX idx_evaluation_results_model_dataset ON evaluation_results(model_version_id, dataset_id);
+CREATE INDEX idx_evaluation_results_entity_type ON evaluation_results(entity_type);

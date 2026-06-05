@@ -1,0 +1,64 @@
+[
+  {
+    "text": "患者于3天前无明显诱因出现头痛、发热，体温最高38.5℃，伴咳嗽、咳白色黏痰。既往有高血压病史10年，长期口服硝苯地平缓释片。",
+    "entities": [
+      {"text": "头痛", "type": "symptom", "start": 16, "end": 18},
+      {"text": "发热", "type": "symptom", "start": 19, "end": 21},
+      {"text": "咳嗽", "type": "symptom", "start": 37, "end": 39},
+      {"text": "咳白色黏痰", "type": "symptom", "start": 40, "end": 45},
+      {"text": "高血压", "type": "disease", "start": 53, "end": 56},
+      {"text": "10年", "type": "time", "start": 58, "end": 60},
+      {"text": "硝苯地平缓释片", "type": "drug", "start": 68, "end": 75},
+      {"text": "3天前", "type": "time", "start": 3, "end": 6}
+    ]
+  },
+  {
+    "text": "入院后完善相关检查，血常规提示白细胞计数升高，胸片提示双肺纹理增粗。给予头孢克肟抗感染治疗，同时予氨溴索化痰。",
+    "entities": [
+      {"text": "血常规", "type": "test", "start": 8, "end": 11},
+      {"text": "白细胞计数", "type": "test", "start": 13, "end": 18},
+      {"text": "胸片", "type": "test", "start": 23, "end": 25},
+      {"text": "双肺纹理增粗", "type": "symptom", "start": 27, "end": 34},
+      {"text": "头孢克肟", "type": "drug", "start": 37, "end": 41},
+      {"text": "抗感染治疗", "type": "operation", "start": 41, "end": 46},
+      {"text": "氨溴索", "type": "drug", "start": 51, "end": 54},
+      {"text": "化痰", "type": "operation", "start": 54, "end": 56}
+    ]
+  },
+  {
+    "text": "患者2周前因胆囊结石行腹腔镜胆囊切除术，术后恢复良好。今日复查腹部B超未见明显异常。",
+    "entities": [
+      {"text": "2周前", "type": "time", "start": 3, "end": 6},
+      {"text": "胆囊结石", "type": "disease", "start": 8, "end": 12},
+      {"text": "腹腔镜胆囊切除术", "type": "operation", "start": 13, "end": 23},
+      {"text": "腹部B超", "type": "test", "start": 43, "end": 47},
+      {"text": "胆囊", "type": "anatomy", "start": 18, "end": 20},
+      {"text": "腹部", "type": "anatomy", "start": 43, "end": 45}
+    ]
+  },
+  {
+    "text": "诊断：2型糖尿病，糖尿病肾病。建议：低盐低脂糖尿病饮食，适量运动，定期监测血糖、肾功能。",
+    "entities": [
+      {"text": "2型糖尿病", "type": "disease", "start": 3, "end": 8},
+      {"text": "糖尿病肾病", "type": "disease", "start": 10, "end": 15},
+      {"text": "低盐低脂糖尿病饮食", "type": "operation", "start": 21, "end": 32},
+      {"text": "适量运动", "type": "operation", "start": 33, "end": 37},
+      {"text": "血糖", "type": "test", "start": 44, "end": 46},
+      {"text": "肾功能", "type": "test", "start": 47, "end": 50},
+      {"text": "肾脏", "type": "anatomy", "start": 13, "end": 15}
+    ]
+  },
+  {
+    "text": "患者老年男性，既往有冠心病病史，5年前因心肌梗死行冠脉造影及支架植入术。术后规律服用阿司匹林、氯吡格雷。",
+    "entities": [
+      {"text": "冠心病", "type": "disease", "start": 13, "end": 16},
+      {"text": "5年前", "type": "time", "start": 22, "end": 25},
+      {"text": "心肌梗死", "type": "disease", "start": 26, "end": 30},
+      {"text": "冠脉造影", "type": "operation", "start": 31, "end": 35},
+      {"text": "支架植入术", "type": "operation", "start": 36, "end": 41},
+      {"text": "阿司匹林", "type": "drug", "start": 55, "end": 59},
+      {"text": "氯吡格雷", "type": "drug", "start": 60, "end": 64},
+      {"text": "心脏", "type": "anatomy", "start": 14, "end": 15}
+    ]
+  }
+]

@@ -158,6 +158,145 @@
           </div>
         </el-card>
       </el-tab-pane>
+
+      <el-tab-pane label="性能对比" name="comparison">
+        <div class="comparison-container">
+          <el-card class="dataset-section">
+            <template #header>
+              <div class="section-header">
+                <span>评估数据集管理</span>
+                <el-button type="primary" @click="showUploadDatasetDialog = true">
+                  <el-icon><Upload /></el-icon>
+                  上传数据集
+                </el-button>
+              </div>
+            </template>
+
+            <el-table :data="datasets" v-loading="loadingDatasets" stripe>
+              <el-table-column prop="datasetName" label="数据集名称" width="200" />
+              <el-table-column prop="description" label="描述" min-width="200" show-overflow-tooltip />
+              <el-table-column prop="recordCount" label="记录数" width="100" align="center" />
+              <el-table-column prop="createdAt" label="上传时间" width="180" />
+              <el-table-column label="操作" width="200" fixed="right">
+                <template #default="{ row }">
+                  <el-button size="small" @click="selectDataset(row)">
+                    {{ selectedDataset?.id === row.id ? '已选择' : '选择此数据集' }}
+                  </el-button>
+                  <el-button size="small" type="danger" @click="deleteDataset(row.id)">
+                    删除
+                  </el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+          </el-card>
+
+          <el-card class="compare-section" v-if="selectedDataset">
+            <template #header>
+              <div class="section-header">
+                <span>对比视图 - {{ selectedDataset.datasetName }}</span>
+                <div>
+                  <el-select 
+                    v-model="selectedModelForEval" 
+                    placeholder="选择模型版本进行评估"
+                    style="width: 200px; margin-right: 8px;"
+                    size="small"
+                  >
+                    <el-option 
+                      v-for="model in models" 
+                      :key="model.id" 
+                      :label="model.versionName" 
+                      :value="model.id" 
+                    />
+                  </el-select>
+                  <el-button 
+                    type="primary" 
+                    size="small" 
+                    :disabled="!selectedModelForEval || evaluating"
+                    @click="startEvaluation"
+                  >
+                    <el-icon v-if="evaluating" class="is-loading"><Loading /></el-icon>
+                    {{ evaluating ? '评估中...' : '开始评估' }}
+                  </el-button>
+                </div>
+              </div>
+            </template>
+
+            <div v-if="comparisonResults.length === 0 && !loadingComparison" class="empty-container">
+              <el-empty description="暂无评估数据，请选择模型版本开始评估">
+                <el-select 
+                  v-model="selectedModelForEval" 
+                  placeholder="选择模型版本"
+                  style="width: 200px; margin-bottom: 12px;"
+                >
+                  <el-option 
+                    v-for="model in models" 
+                    :key="model.id" 
+                    :label="model.versionName" 
+                    :value="model.id" 
+                  />
+                </el-select>
+                <div>
+                  <el-button type="primary" :disabled="!selectedModelForEval" @click="startEvaluation">
+                    开始评估
+                  </el-button>
+                </div>
+              </el-empty>
+            </div>
+
+            <div v-else v-loading="loadingComparison">
+              <div class="evaluation-progress" v-if="evaluating">
+                <el-progress 
+                  :percentage="evaluationProgressPercent" 
+                  :status="evaluationProgressStatus"
+                />
+                <span class="progress-text">
+                  已完成 {{ currentProgress?.processedCount || 0 }} / {{ currentProgress?.totalCount || 0 }}
+                  <span v-if="currentProgress?.failedCount > 0">
+                    (失败: {{ currentProgress.failedCount }})
+                  </span>
+                </span>
+              </div>
+
+              <div class="compare-table-wrapper">
+                <el-table :data="compareTableData" border stripe class="compare-table">
+                  <el-table-column 
+                    prop="entityType" 
+                    label="实体类型" 
+                    width="120" 
+                    fixed="left"
+                    align="center"
+                  >
+                    <template #default="{ row }">
+                      <strong>{{ row.entityTypeLabel }}</strong>
+                    </template>
+                  </el-table-column>
+                  <el-table-column 
+                    v-for="result in comparisonResults" 
+                    :key="result.modelVersionId"
+                    :label="result.modelVersionName"
+                    align="center"
+                    min-width="130"
+                  >
+                    <template #default="{ row }">
+                      <div 
+                        class="f1-cell" 
+                        :style="getF1CellStyle(row.f1Values[result.modelVersionId])"
+                      >
+                        {{ formatF1(row.f1Values[result.modelVersionId]) }}
+                      </div>
+                    </template>
+                  </el-table-column>
+                </el-table>
+              </div>
+
+              <div class="radar-chart-wrapper">
+                <h4>各实体类型F1雷达图</h4>
+                <div ref="radarChartRef" class="radar-chart"></div>
+              </div>
+            </div>
+          </el-card>
+        </div>
+      </el-tab-pane>
     </el-tabs>
 
     <el-dialog v-model="showUploadDialog" title="上传模型" width="500px">
@@ -190,14 +329,53 @@
         <el-button type="primary" @click="uploadModel">上传</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="showUploadDatasetDialog" title="上传评估数据集" width="500px">
+      <el-form :model="newDataset" label-width="100px">
+        <el-form-item label="数据集名称" required>
+          <el-input v-model="newDataset.datasetName" placeholder="输入数据集名称" />
+        </el-form-item>
+        <el-form-item label="描述">
+          <el-input v-model="newDataset.description" type="textarea" :rows="2" />
+        </el-form-item>
+        <el-form-item label="JSON文件" required>
+          <el-upload
+            drag
+            :auto-upload="false"
+            :show-file-list="true"
+            :limit="1"
+            :on-change="handleDatasetFileChange"
+            :on-exceed="() => ElMessage.warning('只能上传一个文件')"
+            accept=".json"
+          >
+            <el-icon class="el-icon--upload"><UploadFilled /></el-icon>
+            <div class="el-upload__text">
+              将JSON文件拖到此处，或<em>点击上传</em>
+            </div>
+            <template #tip>
+              <div class="el-upload__tip">
+                请上传JSON格式的评估数据集，每条记录包含text和entities字段
+              </div>
+            </template>
+          </el-upload>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showUploadDatasetDialog = false">取消</el-button>
+        <el-button type="primary" :disabled="!newDataset.file" @click="uploadDataset">
+          上传
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, watch, nextTick, computed, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Refresh, Loading } from '@element-plus/icons-vue'
-import { modelApi, documentApi } from '@/api'
+import { Plus, Refresh, Loading, Upload, UploadFilled } from '@element-plus/icons-vue'
+import { modelApi, documentApi, evaluationApi } from '@/api'
+import * as echarts from 'echarts'
 
 const activeTab = ref('models')
 const models = ref([])
@@ -222,6 +400,28 @@ const entityTypeConfig = [
   { type: 'anatomy', label: '解剖', color: '#8e44ad' },
   { type: 'time', label: '时间', color: '#16a085' }
 ]
+
+const entityTypeOrder = ['disease', 'symptom', 'drug', 'test', 'operation', 'anatomy', 'time']
+
+const datasets = ref([])
+const loadingDatasets = ref(false)
+const showUploadDatasetDialog = ref(false)
+const newDataset = ref({
+  datasetName: '',
+  description: '',
+  file: null
+})
+const selectedDataset = ref(null)
+const selectedModelForEval = ref(null)
+const comparisonResults = ref([])
+const loadingComparison = ref(false)
+const evaluating = ref(false)
+const currentTaskId = ref(null)
+const currentProgress = ref(null)
+let progressPollingTimer = null
+
+const radarChartRef = ref(null)
+let radarChart = null
 
 const getEntityTypeName = (type) => {
   const config = entityTypeConfig.find(c => c.type === type)
@@ -339,7 +539,284 @@ const resolveConflict = async (entityText, targetType) => {
   }
 }
 
-onMounted(loadModels)
+const loadDatasets = async () => {
+  loadingDatasets.value = true
+  try {
+    datasets.value = await evaluationApi.getDatasets()
+  } catch (error) {
+    ElMessage.error('加载数据集列表失败')
+  } finally {
+    loadingDatasets.value = false
+  }
+}
+
+const handleDatasetFileChange = (file) => {
+  newDataset.value.file = file.raw
+}
+
+const uploadDataset = async () => {
+  if (!newDataset.value.datasetName || !newDataset.value.file) {
+    ElMessage.warning('请填写数据集名称并选择文件')
+    return
+  }
+  try {
+    const formData = new FormData()
+    formData.append('datasetName', newDataset.value.datasetName)
+    formData.append('description', newDataset.value.description || '')
+    formData.append('file', newDataset.value.file)
+    
+    await evaluationApi.uploadDataset(formData)
+    ElMessage.success('数据集上传成功')
+    showUploadDatasetDialog.value = false
+    newDataset.value = { datasetName: '', description: '', file: null }
+    loadDatasets()
+  } catch (error) {
+    const msg = error.response?.data?.error || error.message || '上传失败'
+    ElMessage.error(msg)
+  }
+}
+
+const selectDataset = async (dataset) => {
+  selectedDataset.value = dataset
+  selectedModelForEval.value = null
+  await loadComparisonResults()
+}
+
+const deleteDataset = async (datasetId) => {
+  try {
+    await ElMessageBox.confirm('确定要删除该数据集吗？相关评估结果也会被删除', '提示', {
+      type: 'warning'
+    })
+    await evaluationApi.deleteDataset(datasetId)
+    ElMessage.success('删除成功')
+    if (selectedDataset.value?.id === datasetId) {
+      selectedDataset.value = null
+      comparisonResults.value = []
+    }
+    loadDatasets()
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error('删除失败')
+    }
+  }
+}
+
+const loadComparisonResults = async () => {
+  if (!selectedDataset.value) return
+  loadingComparison.value = true
+  try {
+    comparisonResults.value = await evaluationApi.getComparisonResults(selectedDataset.value.id)
+    await nextTick()
+    renderRadarChart()
+  } catch (error) {
+    ElMessage.error('加载对比结果失败')
+  } finally {
+    loadingComparison.value = false
+  }
+}
+
+const startEvaluation = async () => {
+  if (!selectedDataset.value || !selectedModelForEval.value) {
+    ElMessage.warning('请选择数据集和模型版本')
+    return
+  }
+  try {
+    const result = await evaluationApi.submitEvaluation(
+      selectedDataset.value.id,
+      selectedModelForEval.value
+    )
+    currentTaskId.value = result.taskId
+    evaluating.value = true
+    ElMessage.success('评估任务已提交')
+    startProgressPolling()
+  } catch (error) {
+    if (error.response?.status === 409) {
+      ElMessage.warning(error.response.data.error)
+    } else {
+      const msg = error.response?.data?.error || error.message || '提交失败'
+      ElMessage.error(msg)
+    }
+  }
+}
+
+const startProgressPolling = () => {
+  stopProgressPolling()
+  progressPollingTimer = setInterval(async () => {
+    try {
+      currentProgress.value = await evaluationApi.getTaskProgress(currentTaskId.value)
+      if (currentProgress.value.status === 'completed' || currentProgress.value.status === 'failed') {
+        stopProgressPolling()
+        evaluating.value = false
+        if (currentProgress.value.status === 'completed') {
+          ElMessage.success('评估完成')
+          await loadComparisonResults()
+        } else {
+          ElMessage.error('评估失败: ' + (currentProgress.value.errorMessage || '未知错误'))
+        }
+      }
+    } catch (error) {
+      console.error('查询进度失败', error)
+    }
+  }, 2000)
+}
+
+const stopProgressPolling = () => {
+  if (progressPollingTimer) {
+    clearInterval(progressPollingTimer)
+    progressPollingTimer = null
+  }
+}
+
+const evaluationProgressPercent = computed(() => {
+  if (!currentProgress.value || currentProgress.value.totalCount === 0) return 0
+  return Math.round((currentProgress.value.processedCount / currentProgress.value.totalCount) * 100)
+})
+
+const evaluationProgressStatus = computed(() => {
+  if (!currentProgress.value) return ''
+  if (currentProgress.value.status === 'failed') return 'exception'
+  if (currentProgress.value.status === 'completed') return 'success'
+  return ''
+})
+
+const compareTableData = computed(() => {
+  if (comparisonResults.value.length === 0) return []
+  
+  const rows = []
+  
+  for (const entityType of entityTypeOrder) {
+    const row = {
+      entityType,
+      entityTypeLabel: getEntityTypeName(entityType),
+      f1Values: {}
+    }
+    for (const result of comparisonResults.value) {
+      const metrics = result.metricsByType[entityType]
+      row.f1Values[result.modelVersionId] = metrics?.f1Score ?? null
+    }
+    rows.push(row)
+  }
+  
+  const overallRow = {
+    entityType: 'overall',
+    entityTypeLabel: 'Overall (Macro-F1)',
+    f1Values: {}
+  }
+  for (const result of comparisonResults.value) {
+    overallRow.f1Values[result.modelVersionId] = result.overallMacro?.f1Score ?? null
+  }
+  rows.push(overallRow)
+  
+  return rows
+})
+
+const getF1CellStyle = (f1) => {
+  if (f1 === null || f1 === undefined) {
+    return { backgroundColor: '#f5f7fa', color: '#909399' }
+  }
+  const value = Math.max(0, Math.min(1, f1))
+  const r = Math.round(245 * (1 - value) + 103 * value)
+  const g = Math.round(108 * (1 - value) + 194 * value)
+  const b = Math.round(108 * (1 - value) + 58 * value)
+  return {
+    backgroundColor: `rgb(${r}, ${g}, ${b})`,
+    color: value > 0.6 ? '#fff' : '#303133',
+    fontWeight: 600
+  }
+}
+
+const formatF1 = (f1) => {
+  if (f1 === null || f1 === undefined) return '-'
+  return (f1 * 100).toFixed(1) + '%'
+}
+
+const renderRadarChart = () => {
+  if (!radarChartRef.value || comparisonResults.value.length === 0) return
+  
+  if (!radarChart) {
+    radarChart = echarts.init(radarChartRef.value)
+  }
+  
+  const indicator = entityTypeOrder.map(type => ({
+    name: getEntityTypeName(type),
+    max: 1
+  }))
+  
+  const series = comparisonResults.value.map((result, index) => ({
+    value: entityTypeOrder.map(type => {
+      const metrics = result.metricsByType[type]
+      return metrics?.f1Score ?? 0
+    }),
+    name: result.modelVersionName,
+    lineStyle: {
+      width: 2
+    },
+    areaStyle: {
+      opacity: 0.1
+    }
+  }))
+  
+  const colors = ['#409eff', '#67c23a', '#e6a23c', '#f56c6c', '#909399', '#8e44ad', '#16a085']
+  
+  radarChart.setOption({
+    color: colors,
+    tooltip: {
+      trigger: 'item',
+      formatter: (params) => {
+        let html = `<strong>${params.name}</strong><br/>`
+        entityTypeOrder.forEach((type, i) => {
+          const value = params.value[i]
+          html += `${getEntityTypeName(type)}: ${(value * 100).toFixed(1)}%<br/>`
+        })
+        return html
+      }
+    },
+    legend: {
+      data: comparisonResults.value.map(r => r.modelVersionName),
+      bottom: 0
+    },
+    radar: {
+      indicator,
+      center: ['50%', '50%'],
+      radius: '65%',
+      axisName: {
+        color: '#606266',
+        fontSize: 12
+      },
+      splitArea: {
+        areaStyle: {
+          color: ['#fafafa', '#f5f7fa', '#ebeef5', '#e4e7ed']
+        }
+      }
+    },
+    series: [{
+      type: 'radar',
+      data: series
+    }]
+  })
+}
+
+const handleResize = () => {
+  radarChart?.resize()
+}
+
+onMounted(() => {
+  loadModels()
+  loadDatasets()
+  window.addEventListener('resize', handleResize)
+})
+
+onUnmounted(() => {
+  stopProgressPolling()
+  window.removeEventListener('resize', handleResize)
+  radarChart?.dispose()
+})
+
+watch(activeTab, (newTab) => {
+  if (newTab === 'comparison') {
+    loadDatasets()
+  }
+})
 </script>
 
 <style scoped lang="scss">
@@ -525,5 +1002,77 @@ onMounted(loadModels)
       }
     }
   }
+}
+
+.comparison-container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+
+  .section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .dataset-section {
+    .el-table {
+      margin-top: 0;
+    }
+  }
+
+  .compare-section {
+    .evaluation-progress {
+      margin-bottom: 20px;
+      padding: 16px;
+      background: #f5f7fa;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+
+      .el-progress {
+        flex: 1;
+      }
+
+      .progress-text {
+        font-size: 13px;
+        color: #606266;
+        white-space: nowrap;
+      }
+    }
+
+    .compare-table-wrapper {
+      margin-bottom: 24px;
+      overflow-x: auto;
+
+      .compare-table {
+        .f1-cell {
+          padding: 8px 12px;
+          border-radius: 4px;
+          text-align: center;
+          font-size: 13px;
+        }
+      }
+    }
+
+    .radar-chart-wrapper {
+      h4 {
+        margin: 0 0 12px 0;
+        font-size: 14px;
+        font-weight: 600;
+        color: #303133;
+      }
+
+      .radar-chart {
+        width: 100%;
+        height: 450px;
+      }
+    }
+  }
+}
+
+:deep(.el-upload-dragger) {
+  padding: 20px;
 }
 </style>

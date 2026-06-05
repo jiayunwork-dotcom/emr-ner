@@ -69,4 +69,23 @@ export const modelApi = {
     })
 }
 
+export const evaluationApi = {
+  getDatasets: () => api.get('/evaluation/datasets'),
+  getDataset: (id) => api.get(`/evaluation/datasets/${id}`),
+  deleteDataset: (id) => api.delete(`/evaluation/datasets/${id}`),
+  uploadDataset: (formData) =>
+    api.post('/evaluation/datasets/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    }),
+  validateDataset: (formData) =>
+    api.post('/evaluation/datasets/validate', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    }),
+  submitEvaluation: (datasetId, modelVersionId) =>
+    api.post(`/evaluation/datasets/${datasetId}/evaluate/${modelVersionId}`),
+  getTaskProgress: (taskId) => api.get(`/evaluation/tasks/${taskId}/progress`),
+  getComparisonResults: (datasetId) =>
+    api.get(`/evaluation/datasets/${datasetId}/compare`)
+}
+
 export default api
