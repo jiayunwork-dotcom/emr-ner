@@ -50,13 +50,7 @@ services:
       - "50051:50051"
     volumes:
       - ./inference/models:/app/models
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+
 
   frontend:
     build:
