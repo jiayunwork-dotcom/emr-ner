@@ -1,0 +1,72 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: emr-ner-postgres
+    environment:
+      POSTGRES_DB: emr_ner
+      POSTGRES_USER: emr_user
+      POSTGRES_PASSWORD: emr_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U emr_user -d emr_ner"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: emr-ner-backend
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/emr_ner
+      SPRING_DATASOURCE_USERNAME: emr_user
+      SPRING_DATASOURCE_PASSWORD: emr_password
+      INFERENCE_SERVICE_HOST: inference
+      INFERENCE_SERVICE_PORT: 50051
+    depends_on:
+      postgres:
+        condition: service_healthy
+      inference:
+        condition: service_started
+    volumes:
+      - ./backend/uploads:/app/uploads
+      - ./backend/models:/app/models
+
+  inference:
+    build:
+      context: ./inference
+      dockerfile: Dockerfile
+    container_name: emr-ner-inference
+    ports:
+      - "50051:50051"
+    volumes:
+      - ./inference/models:/app/models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: emr-ner-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:

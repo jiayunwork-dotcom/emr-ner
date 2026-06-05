@@ -1,0 +1,86 @@
+syntax = "proto3";
+
+package inference;
+
+service InferenceService {
+    rpc ExtractEntities (ExtractEntitiesRequest) returns (ExtractEntitiesResponse);
+    rpc ExtractRelations (ExtractRelationsRequest) returns (ExtractRelationsResponse);
+    rpc ExtractTimelines (ExtractTimelinesRequest) returns (ExtractTimelinesResponse);
+    rpc FullInference (FullInferenceRequest) returns (FullInferenceResponse);
+}
+
+message Entity {
+    string entity_text = 1;
+    string entity_type = 2;
+    int32 start_pos = 3;
+    int32 end_pos = 4;
+    bool is_negated = 5;
+    bool is_uncertain = 6;
+    float confidence = 7;
+}
+
+message Relation {
+    int32 head_index = 1;
+    int32 tail_index = 2;
+    string relation_type = 3;
+    float confidence = 4;
+}
+
+message Timeline {
+    string time_expression = 1;
+    string normalized_date = 2;
+    string associated_event = 3;
+    int32 entity_index = 4;
+    float confidence = 5;
+}
+
+message ExtractEntitiesRequest {
+    string text = 1;
+    string model_version = 2;
+}
+
+message ExtractEntitiesResponse {
+    repeated Entity entities = 1;
+    string model_version = 2;
+    float latency_ms = 3;
+}
+
+message ExtractRelationsRequest {
+    string text = 1;
+    repeated Entity entities = 2;
+    string model_version = 3;
+}
+
+message ExtractRelationsResponse {
+    repeated Relation relations = 1;
+    string model_version = 2;
+    float latency_ms = 3;
+}
+
+message ExtractTimelinesRequest {
+    string text = 1;
+    repeated Entity entities = 2;
+    string reference_date = 3;
+    string model_version = 4;
+}
+
+message ExtractTimelinesResponse {
+    repeated Timeline timelines = 1;
+    string model_version = 2;
+    float latency_ms = 3;
+}
+
+message FullInferenceRequest {
+    string text = 1;
+    string reference_date = 2;
+    string model_version = 3;
+}
+
+message FullInferenceResponse {
+    string original_text = 1;
+    repeated Entity entities = 2;
+    repeated Relation relations = 3;
+    repeated Timeline timelines = 4;
+    string model_version = 5;
+    float latency_ms = 6;
+}

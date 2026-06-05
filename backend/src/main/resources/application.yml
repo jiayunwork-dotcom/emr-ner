@@ -1,0 +1,46 @@
+spring:
+  application:
+    name: emr-ner-backend
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/emr_ner}
+    username: ${SPRING_DATASOURCE_USERNAME:emr_user}
+    password: ${SPRING_DATASOURCE_PASSWORD:emr_password}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+  servlet:
+    multipart:
+      max-file-size: 100MB
+      max-request-size: 100MB
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: Asia/Shanghai
+
+server:
+  port: 8080
+  servlet:
+    context-path: /api
+
+inference:
+  service:
+    host: ${INFERENCE_SERVICE_HOST:localhost}
+    port: ${INFERENCE_SERVICE_PORT:50051}
+
+app:
+  upload-dir: ${UPLOAD_DIR:./uploads}
+  model-dir: ${MODEL_DIR:./models}
+  jwt:
+    secret: ${JWT_SECRET:emr-ner-secret-key-for-jwt-token-generation-2024}
+    expiration-ms: 86400000
+
+logging:
+  level:
+    com.emr.ner: INFO
+    org.springframework.web: INFO
+    org.hibernate.SQL: WARN
