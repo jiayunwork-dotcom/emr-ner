@@ -14,8 +14,7 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -317,5 +316,172 @@ public class DocumentService {
         dto.setEntityId(timeline.getEntityId());
         dto.setConfidence(timeline.getConfidence());
         return dto;
+    }
+
+    public StatusCountDTO getStatusCounts() {
+        List<Object[]> counts = documentRepository.countByStatus();
+        StatusCountDTO dto = new StatusCountDTO();
+        for (Object[] row : counts) {
+            String status = (String) row[0];
+            Long count = (Long) row[1];
+            switch (status) {
+                case "pending":
+                    dto.setPending(count);
+                    break;
+                case "processing":
+                    dto.setProcessing(count);
+                    break;
+                case "completed":
+                    dto.setCompleted(count);
+                    break;
+                case "annotated":
+                    dto.setAnnotated(count);
+                    break;
+                case "failed":
+                    dto.setFailed(count);
+                    break;
+            }
+        }
+        return dto;
+    }
+
+    @Transactional
+    public void batchUpdateStatus(List<Long> documentIds, String status, Long userId) {
+        List<Document> docs = documentRepository.findAllById(documentIds);
+        for (Document doc : docs) {
+            doc.setStatus(status);
+            if ("annotated".equals(status)) {
+                doc.setAnnotatedBy(userId);
+                doc.setAnnotatedAt(java.time.LocalDateTime.now());
+            }
+        }
+        documentRepository.saveAll(docs);
+    }
+
+    public List<ConsistencyConflictDTO> checkConsistency() {
+        List<Entity> allEntities = entityRepository.findAll();
+        Map<String, List<EntityAnnotationDTO>> entityMap = new HashMap<>();
+        Map<Long, Document> docMap = documentRepository.findAll().stream()
+            .collect(Collectors.toMap(Document::getId, d -> d));
+
+        for (Entity entity : allEntities) {
+            String key = entity.getEntityText().trim();
+            if (key.isEmpty()) continue;
+            
+            EntityAnnotationDTO ann = new EntityAnnotationDTO();
+            ann.setDocumentId(entity.getDocumentId());
+            Document doc = docMap.get(entity.getDocumentId());
+            ann.setDocumentTitle(doc != null ? doc.getTitle() : "");
+            ann.setEntityId(entity.getId());
+            ann.setEntityType(entity.getEntityType());
+            ann.setStartPos(entity.getStartPos());
+            ann.setEndPos(entity.getEndPos());
+            ann.setSource(entity.getSource());
+            
+            entityMap.computeIfAbsent(key, k -> new ArrayList<>()).add(ann);
+        }
+
+        List<ConsistencyConflictDTO> conflicts = new ArrayList<>();
+        for (Map.Entry<String, List<EntityAnnotationDTO>> entry : entityMap.entrySet()) {
+            List<EntityAnnotationDTO> annotations = entry.getValue();
+            Set<String> types = annotations.stream()
+                .map(EntityAnnotationDTO::getEntityType)
+                .collect(Collectors.toSet());
+            
+            if (types.size() > 1) {
+                ConsistencyConflictDTO conflict = new ConsistencyConflictDTO();
+                conflict.setEntityText(entry.getKey());
+                conflict.setAnnotations(annotations);
+                conflicts.add(conflict);
+            }
+        }
+
+        return conflicts;
+    }
+
+    @Transactional
+    public void resolveConsistencyConflict(String entityText, String targetType, Long userId) {
+        List<Entity> entities = entityRepository.findAll().stream()
+            .filter(e -> e.getEntityText().trim().equals(entityText.trim()))
+            .collect(Collectors.toList());
+        
+        for (Entity entity : entities) {
+            entity.setEntityType(targetType);
+            entity.setSource("human");
+            entity.setAnnotatedBy(userId);
+        }
+        entityRepository.saveAll(entities);
+    }
+
+    public List<ExportDocumentDTO> exportAnnotations(List<Long> documentIds) {
+        List<Document> docs;
+        if (documentIds == null || documentIds.isEmpty()) {
+            docs = documentRepository.findAnnotatedOrCompleted();
+        } else {
+            docs = documentRepository.findAllById(documentIds);
+        }
+
+        List<ExportDocumentDTO> result = new ArrayList<>();
+        for (Document doc : docs) {
+            ExportDocumentDTO exportDoc = new ExportDocumentDTO();
+            exportDoc.setText(doc.getContent());
+
+            List<Entity> entities = entityRepository.findByDocumentId(doc.getId());
+            entities.sort(Comparator.comparingInt(Entity::getStartPos));
+
+            List<Entity> filteredEntities = new ArrayList<>();
+            Set<String> humanEntityKeys = new HashSet<>();
+            
+            for (Entity e : entities) {
+                String key = e.getStartPos() + "-" + e.getEndPos();
+                if ("human".equals(e.getSource())) {
+                    humanEntityKeys.add(key);
+                    filteredEntities.add(e);
+                }
+            }
+            
+            for (Entity e : entities) {
+                String key = e.getStartPos() + "-" + e.getEndPos();
+                if (!"human".equals(e.getSource()) && !humanEntityKeys.contains(key)) {
+                    filteredEntities.add(e);
+                }
+            }
+
+            filteredEntities.sort(Comparator.comparingInt(Entity::getStartPos));
+
+            Map<Long, Integer> entityIndexMap = new HashMap<>();
+            List<ExportEntityDTO> exportEntities = new ArrayList<>();
+            for (int i = 0; i < filteredEntities.size(); i++) {
+                Entity e = filteredEntities.get(i);
+                entityIndexMap.put(e.getId(), i);
+                
+                ExportEntityDTO ee = new ExportEntityDTO();
+                ee.setText(e.getEntityText());
+                ee.setType(e.getEntityType());
+                ee.setStart(e.getStartPos());
+                ee.setEnd(e.getEndPos());
+                exportEntities.add(ee);
+            }
+            exportDoc.setEntities(exportEntities);
+
+            List<Relation> relations = relationRepository.findByDocumentId(doc.getId());
+            List<ExportRelationDTO> exportRelations = new ArrayList<>();
+            for (Relation r : relations) {
+                Integer headIdx = entityIndexMap.get(r.getHeadEntityId());
+                Integer tailIdx = entityIndexMap.get(r.getTailEntityId());
+                if (headIdx != null && tailIdx != null) {
+                    ExportRelationDTO er = new ExportRelationDTO();
+                    er.setHead(headIdx);
+                    er.setTail(tailIdx);
+                    er.setType(r.getRelationType());
+                    exportRelations.add(er);
+                }
+            }
+            exportDoc.setRelations(exportRelations);
+
+            result.add(exportDoc);
+        }
+
+        return result;
     }
 }

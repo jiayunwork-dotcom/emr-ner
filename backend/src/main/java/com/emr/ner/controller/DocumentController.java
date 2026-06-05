@@ -12,6 +12,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -112,5 +113,37 @@ public class DocumentController {
     public ResponseEntity<Document> markAsAnnotated(@PathVariable Long id) {
         Document doc = documentService.markAsAnnotated(id, 1L);
         return ResponseEntity.ok(doc);
+    }
+
+    @GetMapping("/status-counts")
+    public ResponseEntity<StatusCountDTO> getStatusCounts() {
+        return ResponseEntity.ok(documentService.getStatusCounts());
+    }
+
+    @PostMapping("/batch-status")
+    public ResponseEntity<Void> batchUpdateStatus(@RequestBody Map<String, Object> request) {
+        List<Long> documentIds = (List<Long>) request.get("documentIds");
+        String status = (String) request.get("status");
+        documentService.batchUpdateStatus(documentIds, status, 1L);
+        return ResponseEntity.ok().build();
+    }
+
+    @GetMapping("/consistency-check")
+    public ResponseEntity<List<ConsistencyConflictDTO>> checkConsistency() {
+        return ResponseEntity.ok(documentService.checkConsistency());
+    }
+
+    @PostMapping("/resolve-consistency")
+    public ResponseEntity<Void> resolveConsistency(@RequestBody Map<String, String> request) {
+        String entityText = request.get("entityText");
+        String targetType = request.get("targetType");
+        documentService.resolveConsistencyConflict(entityText, targetType, 1L);
+        return ResponseEntity.ok().build();
+    }
+
+    @PostMapping("/export")
+    public ResponseEntity<List<ExportDocumentDTO>> exportAnnotations(@RequestBody(required = false) Map<String, List<Long>> request) {
+        List<Long> documentIds = request != null ? request.get("documentIds") : null;
+        return ResponseEntity.ok(documentService.exportAnnotations(documentIds));
     }
 }

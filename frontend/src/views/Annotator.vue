@@ -48,6 +48,7 @@
           class="text-content"
           ref="textContainer"
           @mouseup="handleTextSelect"
+          @mousedown="hideToolbar"
         >
           <span
             v-for="(segment, index) in textSegments"
@@ -60,6 +61,31 @@
             :style="segment.entity ? getEntityStyle(segment.entity) : {}"
             @click="segment.entity && selectEntity(segment.entity)"
           >{{ segment.text }}</span>
+        </div>
+
+        <div 
+          v-if="showToolbar" 
+          class="floating-toolbar"
+          :style="{ left: toolbarPosition.x + 'px', top: toolbarPosition.y + 'px' }"
+          @mousedown.stop
+        >
+          <div class="toolbar-inner">
+            <el-button
+              v-for="config in entityTypeConfig"
+              :key="config.type"
+              size="small"
+              :style="{ 
+                backgroundColor: config.color + '20', 
+                color: config.color,
+                borderColor: config.color + '60'
+              }"
+              @click="quickAddEntity(config.type)"
+            >
+              {{ config.label }}
+            </el-button>
+            <el-divider direction="vertical" />
+            <el-button size="small" @click="hideToolbar">取消</el-button>
+          </div>
         </div>
       </el-card>
 
@@ -92,6 +118,15 @@
                   <el-tag v-if="entity.isNegated" size="small" type="danger">否定</el-tag>
                   <el-tag v-if="entity.isUncertain" size="small" type="warning">不确定</el-tag>
                 </div>
+                <el-button 
+                  class="quick-delete-btn"
+                  size="small" 
+                  type="danger" 
+                  link 
+                  @click.stop="quickDeleteEntity(entity.id)"
+                >
+                  <el-icon><Delete /></el-icon>
+                </el-button>
               </div>
               <div class="entity-text">{{ entity.entityText }}</div>
               <div class="entity-meta">
@@ -274,9 +309,9 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh, Check, Back, Delete, ArrowRight } from '@element-plus/icons-vue'
 import { documentApi } from '@/api'
 
@@ -294,6 +329,10 @@ const textContainer = ref(null)
 const showAddEntity = ref(false)
 const showEditEntity = ref(false)
 const showAddRelation = ref(false)
+
+const showToolbar = ref(false)
+const toolbarPosition = ref({ x: 0, y: 0 })
+const selectedTextInfo = ref(null)
 
 const newEntity = ref({
   entityText: '',
@@ -414,7 +453,7 @@ const selectEntity = (entity) => {
   showEditEntity.value = true
 }
 
-const handleTextSelect = () => {
+const handleTextSelect = (e) => {
   const selection = window.getSelection()
   if (selection && selection.toString().trim()) {
     const selectedText = selection.toString()
@@ -444,18 +483,66 @@ const handleTextSelect = () => {
     }
     
     if (startPos !== -1 && endPos !== -1) {
-      newEntity.value = {
+      selectedTextInfo.value = {
         entityText: selectedText,
-        entityType: 'disease',
         startPos: startPos,
-        endPos: endPos,
-        isNegated: false,
-        isUncertain: false
+        endPos: endPos
       }
-      showAddEntity.value = true
+      
+      const rect = range.getBoundingClientRect()
+      const containerRect = textContainer.value.getBoundingClientRect()
+      
+      toolbarPosition.value = {
+        x: rect.left - containerRect.left + rect.width / 2 - 200,
+        y: rect.top - containerRect.top - 50
+      }
+      
+      showToolbar.value = true
     }
     
     selection.removeAllRanges()
+  }
+}
+
+const hideToolbar = () => {
+  showToolbar.value = false
+  selectedTextInfo.value = null
+}
+
+const quickAddEntity = async (entityType) => {
+  if (!selectedTextInfo.value) {
+    hideToolbar()
+    return
+  }
+  
+  try {
+    const entityData = {
+      ...selectedTextInfo.value,
+      entityType: entityType,
+      isNegated: false,
+      isUncertain: false
+    }
+    await documentApi.addEntity(documentId, entityData)
+    ElMessage.success('添加实体成功')
+    hideToolbar()
+    loadResult()
+  } catch (error) {
+    ElMessage.error('添加实体失败')
+  }
+}
+
+const quickDeleteEntity = async (entityId) => {
+  try {
+    await ElMessageBox.confirm('确定要删除该实体吗？', '提示', {
+      type: 'warning'
+    })
+    await documentApi.deleteEntity(documentId, entityId)
+    ElMessage.success('删除实体成功')
+    loadResult()
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error('删除实体失败')
+    }
   }
 }
 
@@ -550,7 +637,20 @@ const getStatusName = (status) => {
   return map[status] || status
 }
 
-onMounted(loadResult)
+const handleClickOutside = (e) => {
+  if (showToolbar.value && !e.target.closest('.floating-toolbar')) {
+    hideToolbar()
+  }
+}
+
+onMounted(() => {
+  loadResult()
+  document.addEventListener('mousedown', handleClickOutside)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('mousedown', handleClickOutside)
+})
 </script>
 
 <style scoped lang="scss">
@@ -595,6 +695,7 @@ onMounted(loadResult)
   flex: 2;
   display: flex;
   flex-direction: column;
+  position: relative;
 
   .panel-header {
     display: flex;
@@ -621,6 +722,7 @@ onMounted(loadResult)
     border-radius: 4px;
     min-height: 400px;
     user-select: text;
+    position: relative;
 
     .text-segment {
       transition: background-color 0.2s;
@@ -645,6 +747,33 @@ onMounted(loadResult)
 
         &.uncertain {
           font-style: italic;
+        }
+      }
+    }
+  }
+
+  .floating-toolbar {
+    position: absolute;
+    z-index: 1000;
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+    padding: 8px;
+    border: 1px solid #ebeef5;
+
+    .toolbar-inner {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+
+      :deep(.el-button) {
+        padding: 6px 12px;
+        font-size: 12px;
+        border-width: 1px;
+        border-style: solid;
+        
+        &:hover {
+          opacity: 0.8;
         }
       }
     }
@@ -681,10 +810,15 @@ onMounted(loadResult)
       margin-bottom: 8px;
       cursor: pointer;
       transition: all 0.2s;
+      position: relative;
 
       &:hover {
         border-color: #409eff;
         background: #ecf5ff;
+
+        .quick-delete-btn {
+          opacity: 1;
+        }
       }
 
       &.selected {
@@ -702,6 +836,12 @@ onMounted(loadResult)
         .entity-flags {
           display: flex;
           gap: 4px;
+        }
+
+        .quick-delete-btn {
+          opacity: 0;
+          transition: opacity 0.2s;
+          margin-left: auto;
         }
       }
 

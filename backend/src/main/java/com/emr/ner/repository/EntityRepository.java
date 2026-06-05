@@ -20,4 +20,10 @@ public interface EntityRepository extends JpaRepository<Entity, Long> {
     @Transactional
     @Query("DELETE FROM Entity e WHERE e.documentId = :documentId AND e.source = 'model'")
     void deleteModelEntitiesByDocumentId(Long documentId);
+
+    @Query("SELECT e FROM Entity e WHERE e.source = 'human' OR e.source = 'model'")
+    List<Entity> findAllEntities();
+
+    @Query("SELECT e FROM Entity e WHERE e.documentId IN :documentIds")
+    List<Entity> findByDocumentIds(List<Long> documentIds);
 }

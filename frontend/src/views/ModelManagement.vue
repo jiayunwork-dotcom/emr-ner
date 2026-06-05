@@ -3,74 +3,162 @@
     <el-card class="header-card">
       <div class="header-content">
         <h2>模型管理</h2>
-        <el-button type="primary" @click="showUploadDialog = true">
+        <el-button v-if="activeTab === 'models'" type="primary" @click="showUploadDialog = true">
           <el-icon><Plus /></el-icon>
           上传模型
+        </el-button>
+        <el-button v-if="activeTab === 'consistency'" type="primary" @click="runConsistencyCheck">
+          <el-icon><Refresh /></el-icon>
+          开始检验
         </el-button>
       </div>
     </el-card>
 
-    <el-row :gutter="16">
-      <el-col :span="8" v-for="model in models" :key="model.id">
-        <el-card shadow="hover" class="model-card">
+    <el-tabs v-model="activeTab" class="main-tabs">
+      <el-tab-pane label="模型列表" name="models">
+        <el-row :gutter="16">
+          <el-col :span="8" v-for="model in models" :key="model.id">
+            <el-card shadow="hover" class="model-card">
+              <template #header>
+                <div class="card-header">
+                  <span class="model-name">{{ model.versionName }}</span>
+                  <el-tag v-if="model.isActive" type="success">当前激活</el-tag>
+                </div>
+              </template>
+              
+              <div class="model-info">
+                <el-descriptions :column="1" size="small" border>
+                  <el-descriptions-item label="模型类型">
+                    {{ model.modelType }}
+                  </el-descriptions-item>
+                  <el-descriptions-item label="描述">
+                    {{ model.description || '-' }}
+                  </el-descriptions-item>
+                  <el-descriptions-item label="创建时间">
+                    {{ model.createdAt }}
+                  </el-descriptions-item>
+                </el-descriptions>
+              </div>
+
+              <div v-if="model.metrics" class="model-metrics">
+                <h4>性能指标</h4>
+                <div class="metrics-grid">
+                  <div class="metric-item">
+                    <div class="metric-label">Precision</div>
+                    <div class="metric-value">{{ (model.metrics.overall?.precision * 100).toFixed(1) }}%</div>
+                  </div>
+                  <div class="metric-item">
+                    <div class="metric-label">Recall</div>
+                    <div class="metric-value">{{ (model.metrics.overall?.recall * 100).toFixed(1) }}%</div>
+                  </div>
+                  <div class="metric-item">
+                    <div class="metric-label">F1 Score</div>
+                    <div class="metric-value">{{ (model.metrics.overall?.f1 * 100).toFixed(1) }}%</div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="model-actions">
+                <el-button 
+                  size="small" 
+                  type="success" 
+                  :disabled="model.isActive"
+                  @click="activateModel(model.id)"
+                >
+                  激活
+                </el-button>
+                <el-button size="small" @click="evaluateModel(model.id)">
+                  评估
+                </el-button>
+                <el-button size="small" type="danger" @click="deleteModel(model.id)">
+                  删除
+                </el-button>
+              </div>
+            </el-card>
+          </el-col>
+        </el-row>
+      </el-tab-pane>
+
+      <el-tab-pane label="一致性检验" name="consistency">
+        <el-card>
           <template #header>
-            <div class="card-header">
-              <span class="model-name">{{ model.versionName }}</span>
-              <el-tag v-if="model.isActive" type="success">当前激活</el-tag>
+            <div class="consistency-header">
+              <span>标注一致性检验</span>
+              <span v-if="conflicts.length > 0" class="conflict-count">
+                发现 {{ conflicts.length }} 个冲突
+              </span>
             </div>
           </template>
-          
-          <div class="model-info">
-            <el-descriptions :column="1" size="small" border>
-              <el-descriptions-item label="模型类型">
-                {{ model.modelType }}
-              </el-descriptions-item>
-              <el-descriptions-item label="描述">
-                {{ model.description || '-' }}
-              </el-descriptions-item>
-              <el-descriptions-item label="创建时间">
-                {{ model.createdAt }}
-              </el-descriptions-item>
-            </el-descriptions>
+
+          <div v-if="checking" class="loading-container">
+            <el-icon class="is-loading" :size="48"><Loading /></el-icon>
+            <p>正在扫描所有标注文档，请稍候...</p>
           </div>
 
-          <div v-if="model.metrics" class="model-metrics">
-            <h4>性能指标</h4>
-            <div class="metrics-grid">
-              <div class="metric-item">
-                <div class="metric-label">Precision</div>
-                <div class="metric-value">{{ (model.metrics.overall?.precision * 100).toFixed(1) }}%</div>
+          <div v-else-if="conflicts.length === 0" class="empty-container">
+            <el-empty description="暂无冲突数据，点击右上角开始检验">
+              <el-button type="primary" @click="runConsistencyCheck">开始检验</el-button>
+            </el-empty>
+          </div>
+
+          <div v-else class="conflict-list">
+            <div 
+              v-for="(conflict, index) in conflicts" 
+              :key="index" 
+              class="conflict-item"
+            >
+              <div class="conflict-header">
+                <span class="conflict-text">"{{ conflict.entityText }}"</span>
+                <span class="conflict-type-count">
+                  存在 {{ new Set(conflict.annotations.map(a => a.entityType)).size }} 种不同标注类型
+                </span>
               </div>
-              <div class="metric-item">
-                <div class="metric-label">Recall</div>
-                <div class="metric-value">{{ (model.metrics.overall?.recall * 100).toFixed(1) }}%</div>
+              
+              <div class="conflict-annotations">
+                <div 
+                  v-for="(ann, annIndex) in conflict.annotations" 
+                  :key="annIndex"
+                  class="annotation-item"
+                >
+                  <el-tag :style="getEntityTagStyle(ann.entityType)" size="small">
+                    {{ getEntityTypeName(ann.entityType) }}
+                  </el-tag>
+                  <span class="annotation-doc">文档: {{ ann.documentTitle || `#${ann.documentId}` }}</span>
+                  <span class="annotation-pos">位置: [{{ ann.startPos }}, {{ ann.endPos }})</span>
+                  <el-tag v-if="ann.source === 'human'" size="small" type="success">人工</el-tag>
+                  <el-tag v-else size="small" type="info">模型</el-tag>
+                </div>
               </div>
-              <div class="metric-item">
-                <div class="metric-label">F1 Score</div>
-                <div class="metric-value">{{ (model.metrics.overall?.f1 * 100).toFixed(1) }}%</div>
+
+              <div class="conflict-actions">
+                <span class="resolve-label">统一修改为:</span>
+                <el-select 
+                  v-model="resolveType[index]" 
+                  placeholder="选择类型" 
+                  size="small"
+                  style="width: 140px"
+                >
+                  <el-option 
+                    v-for="config in entityTypeConfig" 
+                    :key="config.type" 
+                    :label="config.label" 
+                    :value="config.type" 
+                  />
+                </el-select>
+                <el-button 
+                  size="small" 
+                  type="primary" 
+                  :disabled="!resolveType[index]"
+                  @click="resolveConflict(conflict.entityText, resolveType[index])"
+                >
+                  应用
+                </el-button>
               </div>
             </div>
           </div>
-
-          <div class="model-actions">
-            <el-button 
-              size="small" 
-              type="success" 
-              :disabled="model.isActive"
-              @click="activateModel(model.id)"
-            >
-              激活
-            </el-button>
-            <el-button size="small" @click="evaluateModel(model.id)">
-              评估
-            </el-button>
-            <el-button size="small" type="danger" @click="deleteModel(model.id)">
-              删除
-            </el-button>
-          </div>
         </el-card>
-      </el-col>
-    </el-row>
+      </el-tab-pane>
+    </el-tabs>
 
     <el-dialog v-model="showUploadDialog" title="上传模型" width="500px">
       <el-form :model="newModel" label-width="100px">
@@ -106,11 +194,12 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus } from '@element-plus/icons-vue'
-import { modelApi } from '@/api'
+import { Plus, Refresh, Loading } from '@element-plus/icons-vue'
+import { modelApi, documentApi } from '@/api'
 
+const activeTab = ref('models')
 const models = ref([])
 const showUploadDialog = ref(false)
 const newModel = ref({
@@ -119,6 +208,35 @@ const newModel = ref({
   description: '',
   file: null
 })
+
+const checking = ref(false)
+const conflicts = ref([])
+const resolveType = reactive({})
+
+const entityTypeConfig = [
+  { type: 'disease', label: '疾病', color: '#f56c6c' },
+  { type: 'symptom', label: '症状', color: '#e6a23c' },
+  { type: 'drug', label: '药物', color: '#67c23a' },
+  { type: 'test', label: '检查', color: '#409eff' },
+  { type: 'operation', label: '手术', color: '#909399' },
+  { type: 'anatomy', label: '解剖', color: '#8e44ad' },
+  { type: 'time', label: '时间', color: '#16a085' }
+]
+
+const getEntityTypeName = (type) => {
+  const config = entityTypeConfig.find(c => c.type === type)
+  return config ? config.label : type
+}
+
+const getEntityTagStyle = (type) => {
+  const config = entityTypeConfig.find(c => c.type === type)
+  const color = config ? config.color : '#409eff'
+  return {
+    backgroundColor: color + '20',
+    color: color,
+    border: `1px solid ${color}40`
+  }
+}
 
 const loadModels = async () => {
   try {
@@ -192,6 +310,35 @@ const uploadModel = async () => {
   }
 }
 
+const runConsistencyCheck = async () => {
+  checking.value = true
+  try {
+    conflicts.value = await documentApi.checkConsistency()
+    ElMessage.success(`检验完成，发现 ${conflicts.value.length} 个冲突`)
+  } catch (error) {
+    ElMessage.error('一致性检验失败')
+  } finally {
+    checking.value = false
+  }
+}
+
+const resolveConflict = async (entityText, targetType) => {
+  try {
+    await ElMessageBox.confirm(
+      `确定将所有"${entityText}"实体统一修改为"${getEntityTypeName(targetType)}"吗？`,
+      '确认修改',
+      { type: 'warning' }
+    )
+    await documentApi.resolveConsistency(entityText, targetType)
+    ElMessage.success('修改成功')
+    runConsistencyCheck()
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error('修改失败')
+    }
+  }
+}
+
 onMounted(loadModels)
 </script>
 
@@ -211,6 +358,12 @@ onMounted(loadModels)
         margin: 0;
         font-size: 20px;
       }
+    }
+  }
+
+  .main-tabs {
+    :deep(.el-tabs__header) {
+      margin: 0;
     }
   }
 
@@ -272,6 +425,104 @@ onMounted(loadModels)
       display: flex;
       gap: 8px;
       justify-content: center;
+    }
+  }
+}
+
+.consistency-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+
+  .conflict-count {
+    color: #f56c6c;
+    font-weight: 500;
+  }
+}
+
+.loading-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 0;
+  color: #909399;
+
+  p {
+    margin-top: 16px;
+  }
+}
+
+.empty-container {
+  padding: 40px 0;
+}
+
+.conflict-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+
+  .conflict-item {
+    padding: 16px;
+    border: 1px solid #ebeef5;
+    border-radius: 8px;
+    background: #fafafa;
+
+    .conflict-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+
+      .conflict-text {
+        font-size: 18px;
+        font-weight: 600;
+        color: #303133;
+      }
+
+      .conflict-type-count {
+        font-size: 13px;
+        color: #f56c6c;
+      }
+    }
+
+    .conflict-annotations {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 16px;
+
+      .annotation-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 12px;
+        background: white;
+        border-radius: 4px;
+        font-size: 13px;
+
+        .annotation-doc {
+          color: #606266;
+        }
+
+        .annotation-pos {
+          color: #909399;
+          font-size: 12px;
+        }
+      }
+    }
+
+    .conflict-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding-top: 12px;
+      border-top: 1px solid #ebeef5;
+
+      .resolve-label {
+        font-size: 13px;
+        color: #606266;
+      }
     }
   }
 }

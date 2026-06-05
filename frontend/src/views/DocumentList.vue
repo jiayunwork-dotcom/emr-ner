@@ -3,12 +3,53 @@
     <el-card class="header-card">
       <div class="header-content">
         <h2>文档管理</h2>
-        <el-button type="primary" @click="showCreateDialog = true">
-          <el-icon><Plus /></el-icon>
-          新建文档
-        </el-button>
+        <div class="header-actions">
+          <el-button type="success" @click="handleExport" :disabled="selectedDocs.length === 0">
+            <el-icon><Download /></el-icon>
+            导出选中
+          </el-button>
+          <el-button type="primary" @click="showCreateDialog = true">
+            <el-icon><Plus /></el-icon>
+            新建文档
+          </el-button>
+        </div>
       </div>
     </el-card>
+
+    <el-row :gutter="16" class="stats-row">
+      <el-col :span="6">
+        <el-card class="stat-card pending">
+          <div class="stat-content">
+            <div class="stat-label">待处理</div>
+            <div class="stat-value">{{ statusCounts.pending }}</div>
+          </div>
+        </el-card>
+      </el-col>
+      <el-col :span="6">
+        <el-card class="stat-card completed">
+          <div class="stat-content">
+            <div class="stat-label">已完成</div>
+            <div class="stat-value">{{ statusCounts.completed }}</div>
+          </div>
+        </el-card>
+      </el-col>
+      <el-col :span="6">
+        <el-card class="stat-card annotated">
+          <div class="stat-content">
+            <div class="stat-label">已标注</div>
+            <div class="stat-value">{{ statusCounts.annotated }}</div>
+          </div>
+        </el-card>
+      </el-col>
+      <el-col :span="6">
+        <el-card class="stat-card processing">
+          <div class="stat-content">
+            <div class="stat-label">处理中</div>
+            <div class="stat-value">{{ statusCounts.processing }}</div>
+          </div>
+        </el-card>
+      </el-col>
+    </el-row>
 
     <el-card class="filter-card">
       <el-form :inline="true" :model="filters">
@@ -40,8 +81,30 @@
       </el-form>
     </el-card>
 
+    <el-card v-if="selectedDocs.length > 0" class="batch-actions-card">
+      <div class="batch-actions">
+        <span>已选择 {{ selectedDocs.length }} 个文档</span>
+        <el-button size="small" type="primary" @click="batchMarkStatus('annotated')">
+          <el-icon><Check /></el-icon>
+          标记为已标注
+        </el-button>
+        <el-button size="small" type="warning" @click="batchMarkStatus('pending')">
+          <el-icon><Clock /></el-icon>
+          标记为待复审
+        </el-button>
+        <el-button size="small" @click="clearSelection">取消选择</el-button>
+      </div>
+    </el-card>
+
     <el-card>
-      <el-table :data="documents" v-loading="loading" stripe>
+      <el-table 
+        :data="documents" 
+        v-loading="loading" 
+        stripe
+        @selection-change="handleSelectionChange"
+        ref="tableRef"
+      >
+        <el-table-column type="selection" width="55" />
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="title" label="标题" min-width="200" show-overflow-tooltip />
         <el-table-column prop="documentType" label="类型" width="120">
@@ -129,14 +192,23 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
-import { Plus, Search } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Plus, Search, Download, Check, Clock } from '@element-plus/icons-vue'
 import { documentApi } from '@/api'
 
 const router = useRouter()
+const tableRef = ref(null)
 const documents = ref([])
 const loading = ref(false)
 const showCreateDialog = ref(false)
+const selectedDocs = ref([])
+const statusCounts = ref({
+  pending: 0,
+  processing: 0,
+  completed: 0,
+  annotated: 0,
+  failed: 0
+})
 
 const filters = ref({
   status: '',
@@ -156,6 +228,14 @@ const newDocument = ref({
   patientId: '',
   content: ''
 })
+
+const loadStatusCounts = async () => {
+  try {
+    statusCounts.value = await documentApi.getStatusCounts()
+  } catch (error) {
+    console.error('加载状态统计失败', error)
+  }
+}
 
 const loadDocuments = async () => {
   loading.value = true
@@ -186,6 +266,7 @@ const createDocument = async () => {
     showCreateDialog.value = false
     newDocument.value = { documentType: 'admission', title: '', patientId: '', content: '' }
     loadDocuments()
+    loadStatusCounts()
   } catch (error) {
     ElMessage.error('创建失败')
   }
@@ -195,7 +276,10 @@ const processDocument = async (row) => {
   try {
     await documentApi.processDocument(row.id)
     ElMessage.success('已开始处理，请稍候刷新查看结果')
-    setTimeout(loadDocuments, 2000)
+    setTimeout(() => {
+      loadDocuments()
+      loadStatusCounts()
+    }, 2000)
   } catch (error) {
     ElMessage.error('处理失败')
   }
@@ -207,6 +291,60 @@ const viewDocument = (row) => {
 
 const annotateDocument = (row) => {
   router.push(`/annotator/${row.id}`)
+}
+
+const handleSelectionChange = (selection) => {
+  selectedDocs.value = selection
+}
+
+const clearSelection = () => {
+  tableRef.value?.clearSelection()
+}
+
+const batchMarkStatus = async (status) => {
+  if (selectedDocs.value.length === 0) {
+    ElMessage.warning('请先选择文档')
+    return
+  }
+  const statusText = status === 'annotated' ? '已标注' : '待复审'
+  try {
+    await ElMessageBox.confirm(
+      `确定将选中的 ${selectedDocs.value.length} 个文档标记为"${statusText}"吗？`,
+      '确认操作',
+      { type: 'warning' }
+    )
+    const ids = selectedDocs.value.map(d => d.id)
+    await documentApi.batchUpdateStatus(ids, status)
+    ElMessage.success(`已成功标记 ${ids.length} 个文档`)
+    clearSelection()
+    loadDocuments()
+    loadStatusCounts()
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error('批量操作失败')
+    }
+  }
+}
+
+const handleExport = async () => {
+  if (selectedDocs.value.length === 0) {
+    ElMessage.warning('请先选择要导出的文档')
+    return
+  }
+  try {
+    const ids = selectedDocs.value.map(d => d.id)
+    const data = await documentApi.exportAnnotations(ids)
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `annotations_${Date.now()}.json`
+    link.click()
+    URL.revokeObjectURL(url)
+    ElMessage.success('导出成功')
+  } catch (error) {
+    ElMessage.error('导出失败')
+  }
 }
 
 const getDocTypeName = (type) => {
@@ -229,7 +367,10 @@ const getStatusTag = (status) => {
   return map[status] || ''
 }
 
-onMounted(loadDocuments)
+onMounted(() => {
+  loadDocuments()
+  loadStatusCounts()
+})
 </script>
 
 <style scoped lang="scss">
@@ -249,12 +390,66 @@ onMounted(loadDocuments)
       margin: 0;
       font-size: 20px;
     }
+
+    .header-actions {
+      display: flex;
+      gap: 8px;
+    }
+  }
+}
+
+.stats-row {
+  .stat-card {
+    text-align: center;
+    border: none;
+    
+    &.pending {
+      background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+    }
+    &.completed {
+      background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
+    }
+    &.annotated {
+      background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+    }
+    &.processing {
+      background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+    }
+
+    .stat-content {
+      .stat-label {
+        font-size: 14px;
+        color: #6b7280;
+        margin-bottom: 8px;
+      }
+      .stat-value {
+        font-size: 28px;
+        font-weight: 600;
+        color: #1f2937;
+      }
+    }
   }
 }
 
 .filter-card {
   :deep(.el-form-item) {
     margin-bottom: 0;
+  }
+}
+
+.batch-actions-card {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  
+  .batch-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    
+    span {
+      color: #1e40af;
+      font-weight: 500;
+    }
   }
 }
 

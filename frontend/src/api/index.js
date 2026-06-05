@@ -30,7 +30,15 @@ export const documentApi = {
   addRelation: (docId, data) => api.post(`/documents/${docId}/relations`, data),
   deleteRelation: (docId, relationId) => 
     api.delete(`/documents/${docId}/relations/${relationId}`),
-  saveAnnotation: (docId) => api.post(`/documents/${docId}/annotate`)
+  saveAnnotation: (docId) => api.post(`/documents/${docId}/annotate`),
+  getStatusCounts: () => api.get('/documents/status-counts'),
+  batchUpdateStatus: (documentIds, status) => 
+    api.post('/documents/batch-status', { documentIds, status }),
+  checkConsistency: () => api.get('/documents/consistency-check'),
+  resolveConsistency: (entityText, targetType) => 
+    api.post('/documents/resolve-consistency', { entityText, targetType }),
+  exportAnnotations: (documentIds) => 
+    api.post('/documents/export', { documentIds }, { responseType: 'json' })
 }
 
 export const batchTaskApi = {

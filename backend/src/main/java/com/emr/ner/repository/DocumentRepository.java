@@ -22,4 +22,10 @@ public interface DocumentRepository extends JpaRepository<Document, Long> {
     Page<Document> findByCreatedBy(Long userId, Pageable pageable);
 
     List<Document> findByStatusOrderByIdAsc(String status);
+
+    @Query("SELECT d.status, COUNT(d) FROM Document d GROUP BY d.status")
+    List<Object[]> countByStatus();
+
+    @Query("SELECT d FROM Document d WHERE d.status = 'annotated' OR d.status = 'completed'")
+    List<Document> findAnnotatedOrCompleted();
 }
