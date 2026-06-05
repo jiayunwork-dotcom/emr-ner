@@ -29,7 +29,8 @@ export const documentApi = {
     api.put(`/documents/${docId}/relations/${relationId}`, data),
   addRelation: (docId, data) => api.post(`/documents/${docId}/relations`, data),
   deleteRelation: (docId, relationId) => 
-    api.delete(`/documents/${docId}/relations/${relationId}`)
+    api.delete(`/documents/${docId}/relations/${relationId}`),
+  saveAnnotation: (docId) => api.post(`/documents/${docId}/annotate`)
 }
 
 export const batchTaskApi = {

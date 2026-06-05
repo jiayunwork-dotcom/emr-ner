@@ -57,4 +57,10 @@ public class Document {
 
     @Column(name = "model_version", length = 50)
     private String modelVersion;
+
+    @Column(name = "annotated_by")
+    private Long annotatedBy;
+
+    @Column(name = "annotated_at")
+    private LocalDateTime annotatedAt;
 }

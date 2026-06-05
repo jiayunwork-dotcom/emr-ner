@@ -102,6 +102,7 @@ public class DocumentService {
             timelineRepository.deleteByDocumentId(documentId);
 
             List<Entity> savedEntities = new ArrayList<>();
+            java.util.Map<Long, Long> entityIdMap = new java.util.HashMap<>();
             for (EntityDTO dto : inferenceResult.getEntities()) {
                 Entity entity = new Entity();
                 entity.setDocumentId(documentId);
@@ -115,19 +116,26 @@ public class DocumentService {
                 entity.setSource("model");
                 entity = entityRepository.save(entity);
                 savedEntities.add(entity);
+                entityIdMap.put(dto.getId(), entity.getId());
                 dto.setId(entity.getId());
             }
 
             for (RelationDTO dto : inferenceResult.getRelations()) {
                 Relation relation = new Relation();
                 relation.setDocumentId(documentId);
-                relation.setHeadEntityId(dto.getHeadEntityId());
-                relation.setTailEntityId(dto.getTailEntityId());
-                relation.setRelationType(dto.getRelationType());
-                relation.setConfidence(dto.getConfidence());
-                relation.setSource("model");
-                relation = relationRepository.save(relation);
-                dto.setId(relation.getId());
+                Long newHeadId = entityIdMap.get(dto.getHeadEntityId());
+                Long newTailId = entityIdMap.get(dto.getTailEntityId());
+                if (newHeadId != null && newTailId != null) {
+                    relation.setHeadEntityId(newHeadId);
+                    relation.setTailEntityId(newTailId);
+                    relation.setRelationType(dto.getRelationType());
+                    relation.setConfidence(dto.getConfidence());
+                    relation.setSource("model");
+                    relation = relationRepository.save(relation);
+                    dto.setId(relation.getId());
+                    dto.setHeadEntityId(newHeadId);
+                    dto.setTailEntityId(newTailId);
+                }
             }
 
             for (TimelineDTO dto : inferenceResult.getTimelines()) {
@@ -137,7 +145,9 @@ public class DocumentService {
                 timeline.setNormalizedDate(dto.getNormalizedDate());
                 timeline.setNormalizedDatetime(dto.getNormalizedDatetime());
                 timeline.setAssociatedEvent(dto.getAssociatedEvent());
-                timeline.setEntityId(dto.getEntityId());
+                if (dto.getEntityId() != null && entityIdMap.containsKey(dto.getEntityId())) {
+                    timeline.setEntityId(entityIdMap.get(dto.getEntityId()));
+                }
                 timeline.setConfidence(dto.getConfidence());
                 timeline = timelineRepository.save(timeline);
                 dto.setId(timeline.getId());
@@ -226,6 +236,15 @@ public class DocumentService {
     @Transactional
     public void deleteRelation(Long relationId) {
         relationRepository.deleteById(relationId);
+    }
+
+    @Transactional
+    public Document markAsAnnotated(Long documentId, Long userId) {
+        Document doc = getDocumentById(documentId);
+        doc.setStatus("annotated");
+        doc.setAnnotatedBy(userId);
+        doc.setAnnotatedAt(java.time.LocalDateTime.now());
+        return documentRepository.save(doc);
     }
 
     @Async

@@ -198,6 +198,41 @@
       </template>
     </el-dialog>
 
+    <el-dialog v-model="showEditEntity" title="编辑实体" width="500px">
+      <el-form :model="editEntity" label-width="100px">
+        <el-form-item label="实体文本">
+          <el-input v-model="editEntity.entityText" />
+        </el-form-item>
+        <el-form-item label="实体类型" required>
+          <el-select v-model="editEntity.entityType" style="width: 100%">
+            <el-option 
+              v-for="config in entityTypeConfig" 
+              :key="config.type" 
+              :label="config.label" 
+              :value="config.type" 
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="起始位置">
+          <el-input-number v-model="editEntity.startPos" :min="0" />
+        </el-form-item>
+        <el-form-item label="结束位置">
+          <el-input-number v-model="editEntity.endPos" :min="0" />
+        </el-form-item>
+        <el-form-item label="否定标记">
+          <el-switch v-model="editEntity.isNegated" />
+        </el-form-item>
+        <el-form-item label="不确定标记">
+          <el-switch v-model="editEntity.isUncertain" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showEditEntity = false">取消</el-button>
+        <el-button type="danger" @click="deleteEntity(editEntity.id)">删除</el-button>
+        <el-button type="primary" @click="updateEntity">保存</el-button>
+      </template>
+    </el-dialog>
+
     <el-dialog v-model="showAddRelation" title="添加关系" width="500px">
       <el-form :model="newRelation" label-width="100px">
         <el-form-item label="头实体" required>
@@ -257,9 +292,20 @@ const selectedEntity = ref(null)
 const textContainer = ref(null)
 
 const showAddEntity = ref(false)
+const showEditEntity = ref(false)
 const showAddRelation = ref(false)
 
 const newEntity = ref({
+  entityText: '',
+  entityType: 'disease',
+  startPos: 0,
+  endPos: 0,
+  isNegated: false,
+  isUncertain: false
+})
+
+const editEntity = ref({
+  id: null,
   entityText: '',
   entityType: 'disease',
   startPos: 0,
@@ -364,28 +410,52 @@ const loadResult = async () => {
 
 const selectEntity = (entity) => {
   selectedEntity.value = entity
+  editEntity.value = { ...entity }
+  showEditEntity.value = true
 }
 
 const handleTextSelect = () => {
   const selection = window.getSelection()
   if (selection && selection.toString().trim()) {
-    const range = selection.getRangeAt(0)
+    const selectedText = selection.toString()
     const text = document.value.content
-    const preSelectionRange = document.createRange()
-    preSelectionRange.selectNodeContents(textContainer.value)
-    preSelectionRange.setEnd(range.startContainer, range.startOffset)
-    const start = preSelectionRange.toString().length
-    const end = start + selection.toString().length
     
-    newEntity.value = {
-      entityText: selection.toString(),
-      entityType: 'disease',
-      startPos: start,
-      endPos: end,
-      isNegated: false,
-      isUncertain: false
+    let startPos = -1
+    let endPos = -1
+    
+    const range = selection.getRangeAt(0)
+    const clonedRange = range.cloneRange()
+    clonedRange.selectNodeContents(textContainer.value)
+    clonedRange.setEnd(range.startContainer, range.startOffset)
+    
+    const allText = clonedRange.toString()
+    const start = allText.length
+    const end = start + selectedText.length
+    
+    if (start >= 0 && end <= text.length && text.substring(start, end) === selectedText) {
+      startPos = start
+      endPos = end
+    } else {
+      const idx = text.indexOf(selectedText)
+      if (idx !== -1) {
+        startPos = idx
+        endPos = idx + selectedText.length
+      }
     }
-    showAddEntity.value = true
+    
+    if (startPos !== -1 && endPos !== -1) {
+      newEntity.value = {
+        entityText: selectedText,
+        entityType: 'disease',
+        startPos: startPos,
+        endPos: endPos,
+        isNegated: false,
+        isUncertain: false
+      }
+      showAddEntity.value = true
+    }
+    
+    selection.removeAllRanges()
   }
 }
 
@@ -401,6 +471,34 @@ const addEntity = async () => {
     loadResult()
   } catch (error) {
     ElMessage.error('添加实体失败')
+  }
+}
+
+const updateEntity = async () => {
+  if (!editEntity.value.entityType) {
+    ElMessage.warning('请选择实体类型')
+    return
+  }
+  try {
+    await documentApi.updateEntity(documentId, editEntity.value.id, editEntity.value)
+    ElMessage.success('更新实体成功')
+    showEditEntity.value = false
+    selectedEntity.value = null
+    loadResult()
+  } catch (error) {
+    ElMessage.error('更新实体失败')
+  }
+}
+
+const deleteEntity = async (entityId) => {
+  try {
+    await documentApi.deleteEntity(documentId, entityId)
+    ElMessage.success('删除实体成功')
+    showEditEntity.value = false
+    selectedEntity.value = null
+    loadResult()
+  } catch (error) {
+    ElMessage.error('删除实体失败')
   }
 }
 
@@ -429,8 +527,13 @@ const deleteRelation = async (relationId) => {
   }
 }
 
-const saveAnnotation = () => {
-  ElMessage.success('标注已保存')
+const saveAnnotation = async () => {
+  try {
+    await documentApi.saveAnnotation(documentId)
+    ElMessage.success('标注已保存')
+  } catch (error) {
+    ElMessage.error('保存标注失败')
+  }
 }
 
 const goBack = () => {
@@ -443,7 +546,7 @@ const getDocTypeName = (type) => {
 }
 
 const getStatusName = (status) => {
-  const map = { pending: '待处理', processing: '处理中', completed: '已完成', failed: '失败' }
+  const map = { pending: '待处理', processing: '处理中', completed: '已完成', annotated: '已标注', failed: '失败' }
   return map[status] || status
 }
 

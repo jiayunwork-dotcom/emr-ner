@@ -107,4 +107,10 @@ public class DocumentController {
         documentService.deleteRelation(relationId);
         return ResponseEntity.ok().build();
     }
+
+    @PostMapping("/{id}/annotate")
+    public ResponseEntity<Document> markAsAnnotated(@PathVariable Long id) {
+        Document doc = documentService.markAsAnnotated(id, 1L);
+        return ResponseEntity.ok(doc);
+    }
 }

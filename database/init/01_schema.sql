@@ -23,7 +23,9 @@ CREATE TABLE IF NOT EXISTS documents (
     created_by BIGINT REFERENCES users(id),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    model_version VARCHAR(50)
+    model_version VARCHAR(50),
+    annotated_by BIGINT REFERENCES users(id),
+    annotated_at TIMESTAMP
 );
 
 CREATE INDEX idx_documents_patient ON documents(patient_id);

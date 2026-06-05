@@ -17,6 +17,7 @@
             <el-option label="待处理" value="pending" />
             <el-option label="处理中" value="processing" />
             <el-option label="已完成" value="completed" />
+            <el-option label="已标注" value="annotated" />
             <el-option label="失败" value="failed" />
           </el-select>
         </el-form-item>
@@ -219,12 +220,12 @@ const getDocTypeTag = (type) => {
 }
 
 const getStatusName = (status) => {
-  const map = { pending: '待处理', processing: '处理中', completed: '已完成', failed: '失败' }
+  const map = { pending: '待处理', processing: '处理中', completed: '已完成', annotated: '已标注', failed: '失败' }
   return map[status] || status
 }
 
 const getStatusTag = (status) => {
-  const map = { pending: 'info', processing: 'warning', completed: 'success', failed: 'danger' }
+  const map = { pending: 'info', processing: 'warning', completed: 'success', annotated: 'primary', failed: 'danger' }
   return map[status] || ''
 }
 
