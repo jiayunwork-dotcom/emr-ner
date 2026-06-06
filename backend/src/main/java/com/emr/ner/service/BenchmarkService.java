@@ -112,9 +112,11 @@ public class BenchmarkService {
     public EvaluationTask triggerAutoRegressionTest(Long modelVersionId) {
         BenchmarkConfig benchmark = getActiveBenchmark();
         if (benchmark == null) {
-            log.info("没有激活的基准配置，跳过自动回归测试");
+            log.info("没有激活的基准配置，跳过自动回归测试，modelVersionId={}", modelVersionId);
             return null;
         }
+
+        log.info("开始自动回归测试，modelVersionId={}, datasetId={}", modelVersionId, benchmark.getDatasetId());
 
         ModelVersion modelVersion = modelVersionRepository.findById(modelVersionId)
             .orElseThrow(() -> new RuntimeException("模型版本不存在: " + modelVersionId));
@@ -126,9 +128,10 @@ public class BenchmarkService {
         try {
             EvaluationTask task = evaluationService.submitEvaluationTask(
                 benchmark.getDatasetId(), modelVersionId, null, false);
+            log.info("自动回归测试任务已提交，taskId={}", task.getId());
             return task;
         } catch (Exception e) {
-            log.error("触发自动回归测试失败", e);
+            log.error("触发自动回归测试失败，modelVersionId={}", modelVersionId, e);
             modelVersion.setValidationStatus("failed");
             Map<String, Object> details = new HashMap<>();
             details.put("error", e.getMessage());
@@ -139,11 +142,26 @@ public class BenchmarkService {
         }
     }
 
+    @Async("taskExecutor")
+    @Transactional
+    public void triggerAutoRegressionTestAsync(Long modelVersionId) {
+        try {
+            Thread.sleep(1000);
+            triggerAutoRegressionTest(modelVersionId);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.warn("自动回归测试被中断", e);
+        } catch (Exception e) {
+            log.error("异步触发自动回归测试失败，modelVersionId={}", modelVersionId, e);
+        }
+    }
+
     @Transactional
     public ValidationResultDTO validateModelAgainstBenchmark(Long modelVersionId, Long taskId) {
         BenchmarkConfig benchmark = getActiveBenchmark();
         if (benchmark == null) {
-            throw new RuntimeException("没有激活的基准配置");
+            log.info("没有激活的基准配置，跳过验证，modelVersionId={}", modelVersionId);
+            return null;
         }
 
         ModelVersion modelVersion = modelVersionRepository.findById(modelVersionId)
@@ -151,7 +169,14 @@ public class BenchmarkService {
 
         List<EvaluationResult> results = resultRepository.findByTaskId(taskId);
         if (results.isEmpty()) {
-            throw new RuntimeException("评估结果不存在");
+            log.warn("评估结果不存在，跳过验证，taskId={}", taskId);
+            modelVersion.setValidationStatus("failed");
+            Map<String, Object> details = new HashMap<>();
+            details.put("error", "评估结果不存在");
+            modelVersion.setValidationDetails(details);
+            modelVersion.setUpdatedAt(LocalDateTime.now());
+            modelVersionRepository.save(modelVersion);
+            return null;
         }
 
         Map<String, EvaluationMetricsDTO> metricsMap = new HashMap<>();

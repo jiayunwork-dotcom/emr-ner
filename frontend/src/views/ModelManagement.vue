@@ -929,7 +929,10 @@ const renderTrendChart = () => {
       series.push({
         name: typeLabels[type] || type,
         type: 'line',
-        data: points.map(p => [p.evaluatedAt, p.f1Score]),
+        data: points.map(p => {
+          const time = new Date(p.evaluatedAt).getTime()
+          return [time, p.f1Score]
+        }),
         lineStyle: { width: 2 },
         symbol: 'circle',
         symbolSize: 6,
@@ -943,7 +946,13 @@ const renderTrendChart = () => {
     tooltip: {
       trigger: 'axis',
       formatter: (params) => {
-        let html = `<strong>${params[0].axisValueLabel}</strong><br/>`
+        const date = new Date(params[0].axisValue)
+        const month = String(date.getMonth() + 1).padStart(2, '0')
+        const day = String(date.getDate()).padStart(2, '0')
+        const hours = String(date.getHours()).padStart(2, '0')
+        const minutes = String(date.getMinutes()).padStart(2, '0')
+        const timeStr = `${month}-${day} ${hours}:${minutes}`
+        let html = `<strong>${timeStr}</strong><br/>`
         params.forEach(p => {
           html += `${p.marker} ${p.seriesName}: ${(p.value[1] * 100).toFixed(1)}%<br/>`
         })
@@ -967,8 +976,14 @@ const renderTrendChart = () => {
       axisLabel: {
         formatter: (value) => {
           const date = new Date(value)
-          return `${date.getMonth() + 1}/${date.getDate()} ${date.getHours()}:${String(date.getMinutes()).padStart(2, '0')}`
-        }
+          const month = String(date.getMonth() + 1).padStart(2, '0')
+          const day = String(date.getDate()).padStart(2, '0')
+          const hours = String(date.getHours()).padStart(2, '0')
+          const minutes = String(date.getMinutes()).padStart(2, '0')
+          return `${month}-${day} ${hours}:${minutes}`
+        },
+        rotate: 30,
+        margin: 12
       }
     },
     yAxis: {

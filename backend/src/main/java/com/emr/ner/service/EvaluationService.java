@@ -284,41 +284,56 @@ public class EvaluationService {
         result.put("newRecordsCount", 0);
 
         EvaluationDataset dataset = getDataset(datasetId);
-        result.put("currentCount", dataset.getRecordCount());
+        int currentCount = dataset.getRecordCount();
+        result.put("currentCount", currentCount);
 
-        Optional<EvaluationTask> lastCompletedTask = taskRepository
-            .findFirstByDatasetIdAndModelVersionIdAndStatusOrderByCreatedAtDesc(
-                datasetId, modelVersionId, "completed");
+        List<EvaluationTask> completedTasks = taskRepository
+            .findByDatasetIdAndModelVersionIdOrderByCreatedAtDesc(datasetId, modelVersionId);
 
-        if (lastCompletedTask.isEmpty()) {
+        List<EvaluationTask> validTasks = completedTasks.stream()
+            .filter(t -> "completed".equals(t.getStatus()))
+            .collect(Collectors.toList());
+
+        if (validTasks.isEmpty()) {
             result.put("reason", "该模型版本尚未在此数据集上进行过评估");
+            log.info("增量评估检查：无已完成任务，datasetId={}, modelVersionId={}", datasetId, modelVersionId);
             return result;
         }
 
-        EvaluationTask lastTask = lastCompletedTask.get();
-        int lastEndIndex = lastTask.getEndIndex() != null ? lastTask.getEndIndex() : lastTask.getTotalCount();
+        EvaluationTask lastTask = validTasks.get(0);
+        int lastEndIndex = lastTask.getEndIndex() != null ? lastTask.getEndIndex() : 
+                          (lastTask.getTotalCount() != null ? lastTask.getTotalCount() : 0);
         result.put("lastEvaluatedCount", lastEndIndex);
 
-        if (dataset.getRecordCount() < lastEndIndex) {
+        log.info("增量评估检查：datasetId={}, modelVersionId={}, currentCount={}, lastTaskId={}, lastEndIndex={}",
+            datasetId, modelVersionId, currentCount, lastTask.getId(), lastEndIndex);
+
+        if (currentCount < lastEndIndex) {
             result.put("reason", "数据集内容已变更，需要全量重新评估");
             result.put("contentChanged", true);
+            log.info("增量评估检查：记录数减少，判定为内容变更");
             return result;
         }
 
-        List<Map<String, Object>> currentContent = dataset.getContent();
-        List<Map<String, Object>> oldContentSample = currentContent.subList(0, Math.min(lastEndIndex, currentContent.size()));
-        String currentHashPrefix = calculateContentHash(new ArrayList<>(oldContentSample));
-
-        if (lastTask.getEndIndex() != null && lastTask.getEndIndex() > 0) {
-            if (dataset.getRecordCount() > lastEndIndex) {
-                result.put("canIncrement", true);
-                result.put("startIndex", lastEndIndex);
-                result.put("newRecordsCount", dataset.getRecordCount() - lastEndIndex);
-                result.put("baseTaskId", lastTask.getId());
-            } else {
-                result.put("reason", "数据集没有新增记录");
-            }
+        if (currentCount == lastEndIndex) {
+            result.put("reason", "数据集没有新增记录");
+            log.info("增量评估检查：记录数未变，无新增");
+            return result;
         }
+
+        if (lastEndIndex <= 0) {
+            result.put("reason", "历史评估数据不完整，需要全量重新评估");
+            log.info("增量评估检查：历史数据不完整，lastEndIndex={}", lastEndIndex);
+            return result;
+        }
+
+        result.put("canIncrement", true);
+        result.put("startIndex", lastEndIndex);
+        result.put("newRecordsCount", currentCount - lastEndIndex);
+        result.put("baseTaskId", lastTask.getId());
+
+        log.info("增量评估检查：可以增量评估，新增{}条记录，从索引{}开始", 
+            currentCount - lastEndIndex, lastEndIndex);
 
         return result;
     }

@@ -94,9 +94,10 @@ public class ModelController {
         model = modelVersionRepository.save(model);
 
         try {
-            benchmarkService.triggerAutoRegressionTest(model.getId());
+            benchmarkService.triggerAutoRegressionTestAsync(model.getId());
+            log.info("已提交异步自动回归测试任务，modelId={}", model.getId());
         } catch (Exception e) {
-            log.warn("自动触发基准测试失败: {}", e.getMessage());
+            log.warn("提交自动基准测试任务失败: {}", e.getMessage());
         }
         
         return ResponseEntity.ok(model);
