@@ -11,6 +11,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -29,6 +33,108 @@ public class EvaluationService {
     private static final Set<String> VALID_ENTITY_TYPES = Set.of(
         "disease", "symptom", "drug", "test", "operation", "anatomy", "time"
     );
+
+    public EvaluationTrendDTO getEvaluationTrends(Long datasetId) {
+        EvaluationDataset dataset = getDataset(datasetId);
+        
+        List<EvaluationTask> allTasks = taskRepository.findByDatasetIdOrderByCreatedAtDesc(datasetId);
+        List<EvaluationTask> completedTasks = allTasks.stream()
+            .filter(t -> "completed".equals(t.getStatus()))
+            .collect(Collectors.toList());
+
+        Map<String, List<TrendDataPointDTO>> trendsByEntityType = new HashMap<>();
+        for (String type : VALID_ENTITY_TYPES) {
+            trendsByEntityType.put(type, new ArrayList<>());
+        }
+
+        List<TrendDataPointDTO> overallMicroTrend = new ArrayList<>();
+        List<TrendDataPointDTO> overallMacroTrend = new ArrayList<>();
+
+        Map<Long, String> modelVersionNames = new HashMap<>();
+
+        for (EvaluationTask task : completedTasks) {
+            List<EvaluationResult> results = resultRepository.findByTaskId(task.getId());
+            if (results.isEmpty()) continue;
+
+            if (!modelVersionNames.containsKey(task.getModelVersionId())) {
+                modelVersionNames.put(task.getModelVersionId(), task.getModelVersionName());
+            }
+
+            Map<String, EvaluationResult> resultMap = new HashMap<>();
+            int totalTp = 0, totalFp = 0, totalFn = 0;
+            float sumF1 = 0f;
+            int validTypeCount = 0;
+
+            for (EvaluationResult r : results) {
+                resultMap.put(r.getEntityType(), r);
+                totalTp += r.getTruePositives();
+                totalFp += r.getFalsePositives();
+                totalFn += r.getFalseNegatives();
+
+                if (r.getTruePositives() + r.getFalseNegatives() > 0) {
+                    sumF1 += r.getF1Score();
+                    validTypeCount++;
+                }
+            }
+
+            for (String type : VALID_ENTITY_TYPES) {
+                EvaluationResult r = resultMap.get(type);
+                if (r != null) {
+                    TrendDataPointDTO point = new TrendDataPointDTO();
+                    point.setEvaluatedAt(task.getCompletedAt());
+                    point.setTaskId(task.getId());
+                    point.setModelVersionId(task.getModelVersionId());
+                    point.setModelVersionName(task.getModelVersionName());
+                    point.setF1Score(r.getF1Score());
+                    point.setPrecision(r.getPrecision());
+                    point.setRecall(r.getRecall());
+                    point.setIsIncremental(task.getIsIncremental());
+                    trendsByEntityType.get(type).add(point);
+                }
+            }
+
+            float microPrecision = (totalTp + totalFp) > 0 ? (float) totalTp / (totalTp + totalFp) : 0f;
+            float microRecall = (totalTp + totalFn) > 0 ? (float) totalTp / (totalTp + totalFn) : 0f;
+            float microF1 = (microPrecision + microRecall) > 0 
+                ? 2 * microPrecision * microRecall / (microPrecision + microRecall) : 0f;
+            float macroF1 = validTypeCount > 0 ? sumF1 / validTypeCount : 0f;
+
+            TrendDataPointDTO microPoint = new TrendDataPointDTO();
+            microPoint.setEvaluatedAt(task.getCompletedAt());
+            microPoint.setTaskId(task.getId());
+            microPoint.setModelVersionId(task.getModelVersionId());
+            microPoint.setModelVersionName(task.getModelVersionName());
+            microPoint.setF1Score(microF1);
+            microPoint.setPrecision(microPrecision);
+            microPoint.setRecall(microRecall);
+            microPoint.setIsIncremental(task.getIsIncremental());
+            overallMicroTrend.add(microPoint);
+
+            TrendDataPointDTO macroPoint = new TrendDataPointDTO();
+            macroPoint.setEvaluatedAt(task.getCompletedAt());
+            macroPoint.setTaskId(task.getId());
+            macroPoint.setModelVersionId(task.getModelVersionId());
+            macroPoint.setModelVersionName(task.getModelVersionName());
+            macroPoint.setF1Score(macroF1);
+            macroPoint.setIsIncremental(task.getIsIncremental());
+            overallMacroTrend.add(macroPoint);
+        }
+
+        for (List<TrendDataPointDTO> points : trendsByEntityType.values()) {
+            points.sort(Comparator.comparing(TrendDataPointDTO::getEvaluatedAt));
+        }
+        overallMicroTrend.sort(Comparator.comparing(TrendDataPointDTO::getEvaluatedAt));
+        overallMacroTrend.sort(Comparator.comparing(TrendDataPointDTO::getEvaluatedAt));
+
+        EvaluationTrendDTO trendDTO = new EvaluationTrendDTO();
+        trendDTO.setDatasetId(datasetId);
+        trendDTO.setDatasetName(dataset.getDatasetName());
+        trendDTO.setTrendsByEntityType(trendsByEntityType);
+        trendDTO.setOverallMicroTrend(overallMicroTrend);
+        trendDTO.setOverallMacroTrend(overallMacroTrend);
+
+        return trendDTO;
+    }
 
     public List<DatasetValidationErrorDTO> validateDataset(List<Map<String, Object>> data) {
         List<DatasetValidationErrorDTO> errors = new ArrayList<>();
@@ -111,6 +217,24 @@ public class EvaluationService {
         }
     }
 
+    private String calculateContentHash(List<Map<String, Object>> content) {
+        try {
+            String contentStr = objectMapper.writeValueAsString(content);
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hashBytes = digest.digest(contentStr.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hexString = new StringBuilder();
+            for (byte b : hashBytes) {
+                String hex = Integer.toHexString(0xff & b);
+                if (hex.length() == 1) hexString.append('0');
+                hexString.append(hex);
+            }
+            return hexString.toString();
+        } catch (NoSuchAlgorithmException | com.fasterxml.jackson.core.JsonProcessingException e) {
+            log.error("计算内容哈希失败", e);
+            return null;
+        }
+    }
+
     @Transactional
     public EvaluationDataset uploadDataset(String datasetName, String description, 
                                            MultipartFile file, Long userId) throws Exception {
@@ -135,7 +259,9 @@ public class EvaluationService {
         dataset.setDescription(description);
         dataset.setRecordCount(data.size());
         dataset.setContent(data);
+        dataset.setContentHash(calculateContentHash(data));
         dataset.setCreatedBy(userId);
+        dataset.setUpdatedAt(LocalDateTime.now());
 
         return datasetRepository.save(dataset);
     }
@@ -149,8 +275,56 @@ public class EvaluationService {
             .orElseThrow(() -> new RuntimeException("评估数据集不存在: " + id));
     }
 
+    public Map<String, Object> checkIncrementalAvailability(Long datasetId, Long modelVersionId) {
+        Map<String, Object> result = new HashMap<>();
+        result.put("canIncrement", false);
+        result.put("reason", "");
+        result.put("lastEvaluatedCount", 0);
+        result.put("currentCount", 0);
+        result.put("newRecordsCount", 0);
+
+        EvaluationDataset dataset = getDataset(datasetId);
+        result.put("currentCount", dataset.getRecordCount());
+
+        Optional<EvaluationTask> lastCompletedTask = taskRepository
+            .findFirstByDatasetIdAndModelVersionIdAndStatusOrderByCreatedAtDesc(
+                datasetId, modelVersionId, "completed");
+
+        if (lastCompletedTask.isEmpty()) {
+            result.put("reason", "该模型版本尚未在此数据集上进行过评估");
+            return result;
+        }
+
+        EvaluationTask lastTask = lastCompletedTask.get();
+        int lastEndIndex = lastTask.getEndIndex() != null ? lastTask.getEndIndex() : lastTask.getTotalCount();
+        result.put("lastEvaluatedCount", lastEndIndex);
+
+        if (dataset.getRecordCount() < lastEndIndex) {
+            result.put("reason", "数据集内容已变更，需要全量重新评估");
+            result.put("contentChanged", true);
+            return result;
+        }
+
+        List<Map<String, Object>> currentContent = dataset.getContent();
+        List<Map<String, Object>> oldContentSample = currentContent.subList(0, Math.min(lastEndIndex, currentContent.size()));
+        String currentHashPrefix = calculateContentHash(new ArrayList<>(oldContentSample));
+
+        if (lastTask.getEndIndex() != null && lastTask.getEndIndex() > 0) {
+            if (dataset.getRecordCount() > lastEndIndex) {
+                result.put("canIncrement", true);
+                result.put("startIndex", lastEndIndex);
+                result.put("newRecordsCount", dataset.getRecordCount() - lastEndIndex);
+                result.put("baseTaskId", lastTask.getId());
+            } else {
+                result.put("reason", "数据集没有新增记录");
+            }
+        }
+
+        return result;
+    }
+
     @Transactional
-    public EvaluationTask submitEvaluationTask(Long datasetId, Long modelVersionId, Long userId) {
+    public EvaluationTask submitEvaluationTask(Long datasetId, Long modelVersionId, Long userId, boolean isIncremental) {
         Optional<EvaluationTask> runningTask = taskRepository
             .findByDatasetIdAndStatusIn(datasetId, List.of("running", "pending"));
         
@@ -173,6 +347,19 @@ public class EvaluationService {
         task.setStatus("pending");
         task.setTotalCount(dataset.getRecordCount());
         task.setCreatedBy(userId);
+        task.setIsIncremental(false);
+        task.setStartIndex(0);
+        task.setEndIndex(dataset.getRecordCount());
+
+        if (isIncremental) {
+            Map<String, Object> incrementalCheck = checkIncrementalAvailability(datasetId, modelVersionId);
+            if (!(Boolean) incrementalCheck.get("canIncrement")) {
+                throw new IllegalArgumentException((String) incrementalCheck.get("reason"));
+            }
+            task.setIsIncremental(true);
+            task.setStartIndex((Integer) incrementalCheck.get("startIndex"));
+            task.setBaseTaskId((Long) incrementalCheck.get("baseTaskId"));
+        }
 
         task = taskRepository.save(task);
 

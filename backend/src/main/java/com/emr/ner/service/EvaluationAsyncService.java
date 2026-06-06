@@ -15,6 +15,7 @@ public class EvaluationAsyncService {
 
     private final EvaluationTaskRepository taskRepository;
     private final EvaluationCoreService evaluationCoreService;
+    private final BenchmarkService benchmarkService;
 
     @Async("taskExecutor")
     @Transactional
@@ -28,6 +29,12 @@ public class EvaluationAsyncService {
             taskRepository.save(task);
 
             evaluationCoreService.doEvaluate(task);
+
+            try {
+                benchmarkService.validateModelAgainstBenchmark(task.getModelVersionId(), taskId);
+            } catch (Exception e) {
+                log.warn("验证模型基准测试失败: {}", e.getMessage());
+            }
 
         } catch (Exception e) {
             log.error("评估任务执行失败", e);

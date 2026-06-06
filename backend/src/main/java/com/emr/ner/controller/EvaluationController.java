@@ -59,13 +59,27 @@ public class EvaluationController {
         }
     }
 
-    @PostMapping("/datasets/{datasetId}/evaluate/{modelVersionId}")
-    public ResponseEntity<?> submitEvaluation(
+    @GetMapping("/datasets/{datasetId}/incremental-check/{modelVersionId}")
+    public ResponseEntity<?> checkIncrementalAvailability(
             @PathVariable Long datasetId,
             @PathVariable Long modelVersionId) {
         try {
+            Map<String, Object> result = evaluationService.checkIncrementalAvailability(
+                datasetId, modelVersionId);
+            return ResponseEntity.ok(result);
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    @PostMapping("/datasets/{datasetId}/evaluate/{modelVersionId}")
+    public ResponseEntity<?> submitEvaluation(
+            @PathVariable Long datasetId,
+            @PathVariable Long modelVersionId,
+            @RequestParam(defaultValue = "false") boolean incremental) {
+        try {
             EvaluationTask task = evaluationService.submitEvaluationTask(
-                datasetId, modelVersionId, null);
+                datasetId, modelVersionId, null, incremental);
             return ResponseEntity.ok(Map.of("taskId", task.getId()));
         } catch (IllegalStateException e) {
             return ResponseEntity.status(HttpStatus.CONFLICT)
@@ -84,6 +98,15 @@ public class EvaluationController {
     public ResponseEntity<List<EvaluationCompareItemDTO>> getComparisonResults(
             @PathVariable Long datasetId) {
         return ResponseEntity.ok(evaluationService.getComparisonResults(datasetId));
+    }
+
+    @GetMapping("/datasets/{datasetId}/trends")
+    public ResponseEntity<?> getEvaluationTrends(@PathVariable Long datasetId) {
+        try {
+            return ResponseEntity.ok(evaluationService.getEvaluationTrends(datasetId));
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
     }
 
     @PostMapping("/datasets/validate")

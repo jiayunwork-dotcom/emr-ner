@@ -35,16 +35,31 @@ public class EvaluationCoreService {
             .orElseThrow(() -> new RuntimeException("数据集不存在: " + task.getDatasetId()));
         
         List<Map<String, Object>> records = dataset.getContent();
+        int startIndex = task.getStartIndex() != null ? task.getStartIndex() : 0;
+        int endIndex = task.getEndIndex() != null ? task.getEndIndex() : records.size();
 
         Map<String, int[]> typeCounts = new HashMap<>();
         for (String type : VALID_ENTITY_TYPES) {
             typeCounts.put(type, new int[]{0, 0, 0});
         }
 
-        int processed = 0;
-        int failed = 0;
+        if (Boolean.TRUE.equals(task.getIsIncremental()) && task.getBaseTaskId() != null) {
+            List<EvaluationResult> baseResults = resultRepository.findByTaskId(task.getBaseTaskId());
+            for (EvaluationResult baseResult : baseResults) {
+                int[] counts = typeCounts.get(baseResult.getEntityType());
+                if (counts != null) {
+                    counts[0] = baseResult.getTruePositives();
+                    counts[1] = baseResult.getFalsePositives();
+                    counts[2] = baseResult.getFalseNegatives();
+                }
+            }
+        }
 
-        for (int i = 0; i < records.size(); i++) {
+        int processed = Boolean.TRUE.equals(task.getIsIncremental()) ? startIndex : 0;
+        int failed = 0;
+        int incrementProcessed = 0;
+
+        for (int i = startIndex; i < endIndex; i++) {
             Map<String, Object> record = records.get(i);
             try {
                 String text = (String) record.get("text");
@@ -56,7 +71,8 @@ public class EvaluationCoreService {
                 compareEntities(goldEntities, predEntities, typeCounts, text, i);
 
                 processed++;
-                if (processed % 10 == 0 || processed == records.size()) {
+                incrementProcessed++;
+                if (incrementProcessed % 10 == 0 || i == endIndex - 1) {
                     task.setProcessedCount(processed);
                     taskRepository.save(task);
                 }
@@ -71,6 +87,7 @@ public class EvaluationCoreService {
         task.setStatus("completed");
         task.setProcessedCount(processed);
         task.setFailedCount(failed);
+        task.setEndIndex(endIndex);
         task.setCompletedAt(java.time.LocalDateTime.now());
         taskRepository.save(task);
     }

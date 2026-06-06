@@ -49,6 +49,18 @@ public class EvaluationTask {
     @Column(name = "completed_at")
     private LocalDateTime completedAt;
 
+    @Column(name = "start_index")
+    private Integer startIndex = 0;
+
+    @Column(name = "end_index")
+    private Integer endIndex = 0;
+
+    @Column(name = "is_incremental")
+    private Boolean isIncremental = false;
+
+    @Column(name = "base_task_id")
+    private Long baseTaskId;
+
     @Column(name = "error_message", columnDefinition = "TEXT")
     private String errorMessage;
 }

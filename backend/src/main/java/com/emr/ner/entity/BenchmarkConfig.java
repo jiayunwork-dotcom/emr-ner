@@ -7,39 +7,41 @@ import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
 import java.time.LocalDateTime;
-import java.util.List;
 import java.util.Map;
 
 @Data
 @Entity
-@Table(name = "evaluation_datasets")
-public class EvaluationDataset {
+@Table(name = "benchmark_configs")
+public class BenchmarkConfig {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "dataset_name", nullable = false, unique = true, length = 255)
+    @Column(name = "dataset_id", nullable = false)
+    private Long datasetId;
+
+    @Column(name = "dataset_name", length = 255)
     private String datasetName;
 
-    @Column(columnDefinition = "TEXT")
-    private String description;
+    @Column(name = "is_active")
+    private Boolean isActive = false;
 
-    @Column(name = "record_count")
-    private Integer recordCount = 0;
+    @Column(name = "overall_micro_f1_threshold")
+    private Float overallMicroF1Threshold = 0.85f;
 
-    @Column(name = "file_path", length = 255)
-    private String filePath;
+    @Column(name = "overall_macro_f1_threshold")
+    private Float overallMacroF1Threshold = 0.80f;
+
+    @Column(name = "per_type_f1_threshold")
+    private Float perTypeF1Threshold = 0.70f;
 
     @JdbcTypeCode(SqlTypes.JSON)
-    @Column(columnDefinition = "jsonb")
-    private List<Map<String, Object>> content;
+    @Column(name = "type_specific_thresholds", columnDefinition = "jsonb")
+    private Map<String, Float> typeSpecificThresholds;
 
     @Column(name = "created_by")
     private Long createdBy;
-
-    @Column(name = "content_hash", length = 64)
-    private String contentHash;
 
     @CreationTimestamp
     @Column(name = "created_at", updatable = false)

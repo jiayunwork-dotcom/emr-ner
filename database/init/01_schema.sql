@@ -89,6 +89,8 @@ CREATE TABLE IF NOT EXISTS model_versions (
     is_active BOOLEAN DEFAULT FALSE,
     file_path VARCHAR(255),
     metrics JSONB,
+    validation_status VARCHAR(20) DEFAULT 'pending',
+    validation_details JSONB,
     uploaded_by BIGINT REFERENCES users(id),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -141,8 +143,10 @@ CREATE TABLE IF NOT EXISTS evaluation_datasets (
     record_count INTEGER DEFAULT 0,
     file_path VARCHAR(255),
     content JSONB,
+    content_hash VARCHAR(64),
     created_by BIGINT REFERENCES users(id),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS evaluation_tasks (
@@ -154,6 +158,10 @@ CREATE TABLE IF NOT EXISTS evaluation_tasks (
     total_count INTEGER DEFAULT 0,
     processed_count INTEGER DEFAULT 0,
     failed_count INTEGER DEFAULT 0,
+    start_index INTEGER DEFAULT 0,
+    end_index INTEGER DEFAULT 0,
+    is_incremental BOOLEAN DEFAULT FALSE,
+    base_task_id BIGINT REFERENCES evaluation_tasks(id),
     created_by BIGINT REFERENCES users(id),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     started_at TIMESTAMP,
@@ -182,3 +190,19 @@ CREATE TABLE IF NOT EXISTS evaluation_results (
 
 CREATE INDEX idx_evaluation_results_model_dataset ON evaluation_results(model_version_id, dataset_id);
 CREATE INDEX idx_evaluation_results_entity_type ON evaluation_results(entity_type);
+
+CREATE TABLE IF NOT EXISTS benchmark_configs (
+    id BIGSERIAL PRIMARY KEY,
+    dataset_id BIGINT NOT NULL REFERENCES evaluation_datasets(id) ON DELETE CASCADE,
+    dataset_name VARCHAR(255),
+    is_active BOOLEAN DEFAULT FALSE,
+    overall_micro_f1_threshold FLOAT DEFAULT 0.85,
+    overall_macro_f1_threshold FLOAT DEFAULT 0.80,
+    per_type_f1_threshold FLOAT DEFAULT 0.70,
+    type_specific_thresholds JSONB,
+    created_by BIGINT REFERENCES users(id),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX idx_benchmark_configs_active ON benchmark_configs(is_active) WHERE is_active = TRUE;

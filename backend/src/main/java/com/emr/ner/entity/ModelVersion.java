@@ -37,6 +37,13 @@ public class ModelVersion {
     @Column(columnDefinition = "jsonb")
     private Map<String, Object> metrics;
 
+    @Column(name = "validation_status", length = 20)
+    private String validationStatus = "pending";
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "validation_details", columnDefinition = "jsonb")
+    private Map<String, Object> validationDetails;
+
     @Column(name = "uploaded_by")
     private Long uploadedBy;
 

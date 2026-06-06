@@ -15,4 +15,12 @@ public interface EvaluationTaskRepository extends JpaRepository<EvaluationTask, 
     List<EvaluationTask> findByDatasetIdAndStatus(Long datasetId, String status);
 
     List<EvaluationTask> findByDatasetIdOrderByCreatedAtDesc(Long datasetId);
+
+    List<EvaluationTask> findByDatasetIdAndModelVersionIdOrderByCreatedAtDesc(Long datasetId, Long modelVersionId);
+
+    Optional<EvaluationTask> findFirstByDatasetIdAndModelVersionIdAndStatusOrderByCreatedAtDesc(
+            Long datasetId, Long modelVersionId, String status);
+
+    List<EvaluationTask> findByDatasetIdAndModelVersionIdAndStatusOrderByCompletedAtAsc(
+            Long datasetId, Long modelVersionId, String status);
 }

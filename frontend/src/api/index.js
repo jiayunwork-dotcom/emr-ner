@@ -81,11 +81,24 @@ export const evaluationApi = {
     api.post('/evaluation/datasets/validate', formData, {
       headers: { 'Content-Type': 'multipart/form-data' }
     }),
-  submitEvaluation: (datasetId, modelVersionId) =>
-    api.post(`/evaluation/datasets/${datasetId}/evaluate/${modelVersionId}`),
+  checkIncrementalAvailability: (datasetId, modelVersionId) =>
+    api.get(`/evaluation/datasets/${datasetId}/incremental-check/${modelVersionId}`),
+  submitEvaluation: (datasetId, modelVersionId, incremental = false) =>
+    api.post(`/evaluation/datasets/${datasetId}/evaluate/${modelVersionId}?incremental=${incremental}`),
   getTaskProgress: (taskId) => api.get(`/evaluation/tasks/${taskId}/progress`),
   getComparisonResults: (datasetId) =>
-    api.get(`/evaluation/datasets/${datasetId}/compare`)
+    api.get(`/evaluation/datasets/${datasetId}/compare`),
+  getTrends: (datasetId) =>
+    api.get(`/evaluation/datasets/${datasetId}/trends`)
+}
+
+export const benchmarkApi = {
+  getAll: () => api.get('/benchmark'),
+  getActive: () => api.get('/benchmark/active'),
+  create: (data) => api.post('/benchmark', data),
+  update: (id, data) => api.put(`/benchmark/${id}`, data),
+  delete: (id) => api.delete(`/benchmark/${id}`),
+  validateModel: (modelVersionId) => api.post(`/benchmark/validate/${modelVersionId}`)
 }
 
 export default api

@@ -2,7 +2,9 @@ package com.emr.ner.controller;
 
 import com.emr.ner.entity.ModelVersion;
 import com.emr.ner.repository.ModelVersionRepository;
+import com.emr.ner.service.BenchmarkService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -10,6 +12,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.util.List;
 import java.util.Map;
 
+@Slf4j
 @RestController
 @RequestMapping("/models")
 @RequiredArgsConstructor
@@ -17,6 +20,7 @@ import java.util.Map;
 public class ModelController {
 
     private final ModelVersionRepository modelVersionRepository;
+    private final BenchmarkService benchmarkService;
 
     @GetMapping
     public ResponseEntity<List<ModelVersion>> getAllModels() {
@@ -83,9 +87,19 @@ public class ModelController {
         model.setModelType(modelType);
         model.setDescription(description);
         model.setIsActive(false);
+        model.setValidationStatus("pending");
         model.setFilePath("/app/models/" + versionName);
+        model.setUpdatedAt(java.time.LocalDateTime.now());
         
-        return ResponseEntity.ok(modelVersionRepository.save(model));
+        model = modelVersionRepository.save(model);
+
+        try {
+            benchmarkService.triggerAutoRegressionTest(model.getId());
+        } catch (Exception e) {
+            log.warn("自动触发基准测试失败: {}", e.getMessage());
+        }
+        
+        return ResponseEntity.ok(model);
     }
 
     @PostMapping("/{id}/evaluate")

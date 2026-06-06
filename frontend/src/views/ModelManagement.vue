@@ -22,7 +22,19 @@
               <template #header>
                 <div class="card-header">
                   <span class="model-name">{{ model.versionName }}</span>
-                  <el-tag v-if="model.isActive" type="success">当前激活</el-tag>
+                  <div class="card-tags">
+                    <el-tag v-if="model.isActive" type="success" size="small">当前激活</el-tag>
+                    <el-tag v-else-if="model.validationStatus === 'passed'" type="success" size="small">
+                      验证通过
+                    </el-tag>
+                    <el-tag v-else-if="model.validationStatus === 'failed'" type="danger" size="small">
+                      验证失败
+                    </el-tag>
+                    <el-tag v-else-if="model.validationStatus === 'running'" type="warning" size="small">
+                      验证中
+                    </el-tag>
+                    <el-tag v-else type="info" size="small">待验证</el-tag>
+                  </div>
                 </div>
               </template>
               
@@ -193,13 +205,14 @@
           <el-card class="compare-section" v-if="selectedDataset">
             <template #header>
               <div class="section-header">
-                <span>对比视图 - {{ selectedDataset.datasetName }}</span>
+                <span>{{ selectedDataset.datasetName }}</span>
                 <div>
                   <el-select 
                     v-model="selectedModelForEval" 
                     placeholder="选择模型版本进行评估"
                     style="width: 200px; margin-right: 8px;"
                     size="small"
+                    @change="checkIncrementalAvailability"
                   >
                     <el-option 
                       v-for="model in models" 
@@ -208,6 +221,17 @@
                       :value="model.id" 
                     />
                   </el-select>
+                  <el-checkbox 
+                    v-model="useIncrementalEval" 
+                    :disabled="!canUseIncremental"
+                    size="small"
+                    style="margin-right: 8px;"
+                  >
+                    增量评估
+                    <span v-if="incrementalInfo?.newRecordsCount > 0">
+                      (新增{{ incrementalInfo.newRecordsCount }}条)
+                    </span>
+                  </el-checkbox>
                   <el-button 
                     type="primary" 
                     size="small" 
@@ -220,6 +244,9 @@
                 </div>
               </div>
             </template>
+
+            <el-tabs v-model="comparisonSubTab" class="comparison-sub-tabs">
+              <el-tab-pane label="对比视图" name="compare">
 
             <div v-if="comparisonResults.length === 0 && !loadingComparison" class="empty-container">
               <el-empty description="暂无评估数据，请选择模型版本开始评估">
@@ -294,6 +321,71 @@
                 <div ref="radarChartRef" class="radar-chart"></div>
               </div>
             </div>
+              </el-tab-pane>
+
+              <el-tab-pane label="趋势视图" name="trend">
+                <div v-loading="loadingTrends" class="trend-container">
+                  <div v-if="!trendData || trendData.overallMicroTrend.length === 0" class="empty-container">
+                    <el-empty description="暂无趋势数据，请先对该数据集进行评估">
+                    </el-empty>
+                  </div>
+                  <div v-else>
+                    <div class="trend-type-selector">
+                      <el-checkbox-group v-model="selectedTrendTypes">
+                        <el-checkbox label="disease">疾病</el-checkbox>
+                        <el-checkbox label="symptom">症状</el-checkbox>
+                        <el-checkbox label="drug">药物</el-checkbox>
+                        <el-checkbox label="test">检查</el-checkbox>
+                        <el-checkbox label="operation">手术</el-checkbox>
+                        <el-checkbox label="anatomy">解剖</el-checkbox>
+                        <el-checkbox label="time">时间</el-checkbox>
+                        <el-checkbox label="overall-micro">Overall Micro</el-checkbox>
+                        <el-checkbox label="overall-macro">Overall Macro</el-checkbox>
+                      </el-checkbox-group>
+                    </div>
+                    <div ref="trendChartRef" class="trend-chart"></div>
+                  </div>
+                </div>
+              </el-tab-pane>
+
+              <el-tab-pane label="基准配置" name="benchmark">
+                <div class="benchmark-container">
+                  <div class="benchmark-header">
+                    <h4>基准数据集配置</h4>
+                    <el-button type="primary" size="small" @click="openBenchmarkDialog">
+                      <el-icon><Plus /></el-icon>
+                      {{ benchmarks.length > 0 ? '编辑基准' : '设置基准' }}
+                    </el-button>
+                  </div>
+                  
+                  <el-card v-if="activeBenchmark" class="active-benchmark-card">
+                    <template #header>
+                      <div class="benchmark-card-header">
+                        <span><el-tag type="success">当前激活基准</el-tag></span>
+                        <span class="benchmark-dataset-name">{{ activeBenchmark.datasetName }}</span>
+                      </div>
+                    </template>
+                    <el-descriptions :column="2" size="small" border>
+                      <el-descriptions-item label="Overall Micro-F1阈值">
+                        {{ (activeBenchmark.overallMicroF1Threshold * 100).toFixed(1) }}%
+                      </el-descriptions-item>
+                      <el-descriptions-item label="Overall Macro-F1阈值">
+                        {{ (activeBenchmark.overallMacroF1Threshold * 100).toFixed(1) }}%
+                      </el-descriptions-item>
+                      <el-descriptions-item label="各实体类型F1阈值">
+                        {{ (activeBenchmark.perTypeF1Threshold * 100).toFixed(1) }}%
+                      </el-descriptions-item>
+                      <el-descriptions-item label="更新时间">
+                        {{ activeBenchmark.updatedAt || activeBenchmark.createdAt }}
+                      </el-descriptions-item>
+                    </el-descriptions>
+                  </el-card>
+                  
+                  <el-empty v-else description="尚未设置基准数据集，新模型版本上传时不会自动验证">
+                  </el-empty>
+                </div>
+              </el-tab-pane>
+            </el-tabs>
           </el-card>
         </div>
       </el-tab-pane>
@@ -367,6 +459,64 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="showBenchmarkDialog" title="基准配置" width="600px">
+      <el-form :model="benchmarkForm" label-width="160px">
+        <el-form-item label="选择数据集" required>
+          <el-select v-model="benchmarkForm.datasetId" placeholder="选择作为基准的数据集" style="width: 100%">
+            <el-option 
+              v-for="ds in datasets" 
+              :key="ds.id" 
+              :label="ds.datasetName" 
+              :value="ds.id" 
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="设为激活基准">
+          <el-switch v-model="benchmarkForm.isActive" />
+        </el-form-item>
+        <el-form-item label="Overall Micro-F1阈值">
+          <el-slider 
+            v-model="benchmarkForm.overallMicroF1Threshold" 
+            :min="0" 
+            :max="1" 
+            :step="0.01"
+            :format-tooltip="(val) => (val * 100).toFixed(0) + '%'"
+          />
+          <div style="text-align: right; color: #909399; font-size: 12px">
+            {{ (benchmarkForm.overallMicroF1Threshold * 100).toFixed(1) }}%
+          </div>
+        </el-form-item>
+        <el-form-item label="Overall Macro-F1阈值">
+          <el-slider 
+            v-model="benchmarkForm.overallMacroF1Threshold" 
+            :min="0" 
+            :max="1" 
+            :step="0.01"
+            :format-tooltip="(val) => (val * 100).toFixed(0) + '%'"
+          />
+          <div style="text-align: right; color: #909399; font-size: 12px">
+            {{ (benchmarkForm.overallMacroF1Threshold * 100).toFixed(1) }}%
+          </div>
+        </el-form-item>
+        <el-form-item label="各实体类型F1阈值">
+          <el-slider 
+            v-model="benchmarkForm.perTypeF1Threshold" 
+            :min="0" 
+            :max="1" 
+            :step="0.01"
+            :format-tooltip="(val) => (val * 100).toFixed(0) + '%'"
+          />
+          <div style="text-align: right; color: #909399; font-size: 12px">
+            {{ (benchmarkForm.perTypeF1Threshold * 100).toFixed(1) }}%
+          </div>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showBenchmarkDialog = false">取消</el-button>
+        <el-button type="primary" @click="saveBenchmark">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -374,7 +524,7 @@
 import { ref, reactive, onMounted, watch, nextTick, computed, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh, Loading, Upload, UploadFilled } from '@element-plus/icons-vue'
-import { modelApi, documentApi, evaluationApi } from '@/api'
+import { modelApi, documentApi, evaluationApi, benchmarkApi } from '@/api'
 import * as echarts from 'echarts'
 
 const activeTab = ref('models')
@@ -422,6 +572,32 @@ let progressPollingTimer = null
 
 const radarChartRef = ref(null)
 let radarChart = null
+
+const comparisonSubTab = ref('compare')
+const useIncrementalEval = ref(false)
+const incrementalInfo = ref(null)
+
+const benchmarks = ref([])
+const activeBenchmark = ref(null)
+const showBenchmarkDialog = ref(false)
+const benchmarkForm = ref({
+  datasetId: null,
+  isActive: false,
+  overallMicroF1Threshold: 0.85,
+  overallMacroF1Threshold: 0.80,
+  perTypeF1Threshold: 0.70,
+  typeSpecificThresholds: {}
+})
+
+const trendChartRef = ref(null)
+let trendChart = null
+const trendData = ref(null)
+const loadingTrends = ref(false)
+const selectedTrendTypes = ref(['disease', 'symptom', 'drug', 'test', 'operation', 'anatomy', 'time', 'overall-micro', 'overall-macro'])
+
+const canUseIncremental = computed(() => {
+  return incrementalInfo.value && incrementalInfo.value.canIncrement
+})
 
 const getEntityTypeName = (type) => {
   const config = entityTypeConfig.find(c => c.type === type)
@@ -615,6 +791,24 @@ const loadComparisonResults = async () => {
   }
 }
 
+const checkIncrementalAvailability = async () => {
+  if (!selectedDataset.value || !selectedModelForEval.value) {
+    incrementalInfo.value = null
+    return
+  }
+  try {
+    incrementalInfo.value = await evaluationApi.checkIncrementalAvailability(
+      selectedDataset.value.id,
+      selectedModelForEval.value
+    )
+    if (!incrementalInfo.value.canIncrement) {
+      useIncrementalEval.value = false
+    }
+  } catch (error) {
+    incrementalInfo.value = null
+  }
+}
+
 const startEvaluation = async () => {
   if (!selectedDataset.value || !selectedModelForEval.value) {
     ElMessage.warning('请选择数据集和模型版本')
@@ -623,7 +817,8 @@ const startEvaluation = async () => {
   try {
     const result = await evaluationApi.submitEvaluation(
       selectedDataset.value.id,
-      selectedModelForEval.value
+      selectedModelForEval.value,
+      useIncrementalEval.value
     )
     currentTaskId.value = result.taskId
     evaluating.value = true
@@ -637,6 +832,155 @@ const startEvaluation = async () => {
       ElMessage.error(msg)
     }
   }
+}
+
+const loadBenchmarks = async () => {
+  try {
+    benchmarks.value = await benchmarkApi.getAll()
+    activeBenchmark.value = benchmarks.value.find(b => b.isActive) || null
+  } catch (error) {
+    console.error('加载基准配置失败', error)
+  }
+}
+
+const openBenchmarkDialog = () => {
+  if (activeBenchmark.value) {
+    benchmarkForm.value = {
+      datasetId: activeBenchmark.value.datasetId,
+      isActive: activeBenchmark.value.isActive,
+      overallMicroF1Threshold: activeBenchmark.value.overallMicroF1Threshold,
+      overallMacroF1Threshold: activeBenchmark.value.overallMacroF1Threshold,
+      perTypeF1Threshold: activeBenchmark.value.perTypeF1Threshold,
+      typeSpecificThresholds: activeBenchmark.value.typeSpecificThresholds || {}
+    }
+  }
+  showBenchmarkDialog.value = true
+}
+
+const saveBenchmark = async () => {
+  if (!benchmarkForm.value.datasetId) {
+    ElMessage.warning('请选择数据集')
+    return
+  }
+  try {
+    if (activeBenchmark.value) {
+      await benchmarkApi.update(activeBenchmark.value.id, benchmarkForm.value)
+    } else {
+      await benchmarkApi.create(benchmarkForm.value)
+    }
+    ElMessage.success('基准配置保存成功')
+    showBenchmarkDialog.value = false
+    await loadBenchmarks()
+  } catch (error) {
+    const msg = error.response?.data?.error || error.message || '保存失败'
+    ElMessage.error(msg)
+  }
+}
+
+const loadTrends = async () => {
+  if (!selectedDataset.value) return
+  loadingTrends.value = true
+  try {
+    trendData.value = await evaluationApi.getTrends(selectedDataset.value.id)
+    await nextTick()
+    renderTrendChart()
+  } catch (error) {
+    ElMessage.error('加载趋势数据失败')
+  } finally {
+    loadingTrends.value = false
+  }
+}
+
+const renderTrendChart = () => {
+  if (!trendChartRef.value || !trendData.value) return
+  
+  if (!trendChart) {
+    trendChart = echarts.init(trendChartRef.value)
+  }
+  
+  const colors = ['#f56c6c', '#e6a23c', '#67c23a', '#409eff', '#909399', '#8e44ad', '#16a085', '#303133', '#606266']
+  const typeLabels = {
+    'disease': '疾病',
+    'symptom': '症状',
+    'drug': '药物',
+    'test': '检查',
+    'operation': '手术',
+    'anatomy': '解剖',
+    'time': '时间',
+    'overall-micro': 'Overall Micro-F1',
+    'overall-macro': 'Overall Macro-F1'
+  }
+  
+  const series = []
+  const legendData = []
+  
+  selectedTrendTypes.value.forEach((type, index) => {
+    let points
+    if (type === 'overall-micro') {
+      points = trendData.value.overallMicroTrend || []
+    } else if (type === 'overall-macro') {
+      points = trendData.value.overallMacroTrend || []
+    } else {
+      points = (trendData.value.trendsByEntityType && trendData.value.trendsByEntityType[type]) || []
+    }
+    
+    if (points.length > 0) {
+      legendData.push(typeLabels[type] || type)
+      series.push({
+        name: typeLabels[type] || type,
+        type: 'line',
+        data: points.map(p => [p.evaluatedAt, p.f1Score]),
+        lineStyle: { width: 2 },
+        symbol: 'circle',
+        symbolSize: 6,
+        itemStyle: { color: colors[index % colors.length] },
+        emphasis: { focus: 'series' }
+      })
+    }
+  })
+  
+  trendChart.setOption({
+    tooltip: {
+      trigger: 'axis',
+      formatter: (params) => {
+        let html = `<strong>${params[0].axisValueLabel}</strong><br/>`
+        params.forEach(p => {
+          html += `${p.marker} ${p.seriesName}: ${(p.value[1] * 100).toFixed(1)}%<br/>`
+        })
+        return html
+      }
+    },
+    legend: {
+      data: legendData,
+      bottom: 0,
+      type: 'scroll'
+    },
+    grid: {
+      left: '3%',
+      right: '4%',
+      bottom: '15%',
+      top: '10%',
+      containLabel: true
+    },
+    xAxis: {
+      type: 'time',
+      axisLabel: {
+        formatter: (value) => {
+          const date = new Date(value)
+          return `${date.getMonth() + 1}/${date.getDate()} ${date.getHours()}:${String(date.getMinutes()).padStart(2, '0')}`
+        }
+      }
+    },
+    yAxis: {
+      type: 'value',
+      min: 0,
+      max: 1,
+      axisLabel: {
+        formatter: (value) => (value * 100).toFixed(0) + '%'
+      }
+    },
+    series
+  })
 }
 
 const startProgressPolling = () => {
@@ -808,11 +1152,13 @@ const renderRadarChart = () => {
 
 const handleResize = () => {
   radarChart?.resize()
+  trendChart?.resize()
 }
 
 onMounted(() => {
   loadModels()
   loadDatasets()
+  loadBenchmarks()
   window.addEventListener('resize', handleResize)
 })
 
@@ -820,11 +1166,33 @@ onUnmounted(() => {
   stopProgressPolling()
   window.removeEventListener('resize', handleResize)
   radarChart?.dispose()
+  trendChart?.dispose()
 })
 
 watch(activeTab, (newTab) => {
   if (newTab === 'comparison') {
     loadDatasets()
+    loadBenchmarks()
+  }
+})
+
+watch(comparisonSubTab, (newTab) => {
+  if (newTab === 'trend' && selectedDataset.value) {
+    loadTrends()
+  }
+})
+
+watch(selectedTrendTypes, () => {
+  if (trendData.value) {
+    renderTrendChart()
+  }
+})
+
+watch(selectedDataset, () => {
+  incrementalInfo.value = null
+  useIncrementalEval.value = false
+  if (comparisonSubTab.value === 'trend') {
+    loadTrends()
   }
 })
 </script>
@@ -867,6 +1235,11 @@ watch(activeTab, (newTab) => {
       .model-name {
         font-weight: 600;
         font-size: 16px;
+      }
+
+      .card-tags {
+        display: flex;
+        gap: 6px;
       }
     }
 
@@ -1084,5 +1457,52 @@ watch(activeTab, (newTab) => {
 
 :deep(.el-upload-dragger) {
   padding: 20px;
+}
+
+.comparison-sub-tabs {
+  :deep(.el-tabs__header) {
+    margin: 0 0 16px 0;
+  }
+}
+
+.trend-container {
+  .trend-type-selector {
+    margin-bottom: 16px;
+    padding: 12px;
+    background: #f5f7fa;
+    border-radius: 4px;
+  }
+
+  .trend-chart {
+    width: 100%;
+    height: 500px;
+  }
+}
+
+.benchmark-container {
+  .benchmark-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+
+    h4 {
+      margin: 0;
+      font-size: 16px;
+    }
+  }
+
+  .active-benchmark-card {
+    .benchmark-card-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+
+      .benchmark-dataset-name {
+        font-weight: 600;
+        font-size: 15px;
+      }
+    }
+  }
 }
 </style>
